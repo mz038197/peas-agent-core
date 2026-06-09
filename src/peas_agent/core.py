@@ -57,7 +57,14 @@ DATA_DIR = Path.home() / ".peas-agent"
 CONFIG_PATH = DATA_DIR / "config.json"
 DEFAULT_WORKSPACE = DATA_DIR / "workspace"
 _ACTIVE_CONFIG: dict[str, Any] = {}
+_RUNTIME_HOST_CONTEXT: str = ""
 CONFIG_PATH_OVERRIDE: Path | None = None
+
+
+def set_host_context(text: str | None) -> None:
+    """Set optional host-environment overlay injected into build_system_prompt()."""
+    global _RUNTIME_HOST_CONTEXT
+    _RUNTIME_HOST_CONTEXT = (text or "").strip()
 
 
 def _get_config_path() -> Path:
@@ -1310,6 +1317,9 @@ def build_system_prompt() -> str:
     if bootstrap:
         parts.append(bootstrap)
 
+    if _RUNTIME_HOST_CONTEXT:
+        parts.append(f"# Host Environment\n\n{_RUNTIME_HOST_CONTEXT}")
+
     parts.append(render_template("agent/tool_contract.md"))
 
     mem = memory_block_for_system()
@@ -1442,11 +1452,13 @@ class Agent:
         *,
         workspace: str | Path | None = None,
         session_name: str | None = None,
+        host_context: str | None = None,
     ) -> Agent:
         config = _ensure_config()
         resolved_workspace = init_workspace(
             _resolve_workspace(workspace, config)
         )
+        set_host_context(host_context)
         _configure_runtime(resolved_workspace, config)
 
         session_file = _resolve_session_path(resolved_workspace, session_name)

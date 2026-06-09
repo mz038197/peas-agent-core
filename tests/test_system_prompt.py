@@ -12,6 +12,7 @@ from peas_agent.core import (
     SkillsLoader,
     WORKSPACE,
     build_system_prompt,
+    set_host_context,
 )
 from peas_agent.tools_loader import ToolsLoader
 from peas_agent.prompt_templates import load_bundled_template, sync_workspace_templates
@@ -74,6 +75,25 @@ def test_build_system_prompt_order(workspace: Path) -> None:
     assert tool_idx > bootstrap_idx
     if memory_idx >= 0:
         assert memory_idx > tool_idx
+
+
+def test_host_context_empty_omits_host_environment(workspace: Path) -> None:
+    sync_workspace_templates(workspace, silent=True)
+    set_host_context(None)
+    prompt = build_system_prompt()
+    assert "# Host Environment" not in prompt
+
+
+def test_host_context_inserted_after_bootstrap_before_tools(workspace: Path) -> None:
+    sync_workspace_templates(workspace, silent=True)
+    set_host_context("Streamlit shell paths")
+    prompt = build_system_prompt()
+    bootstrap_idx = prompt.find("## AGENTS.md")
+    host_idx = prompt.find("# Host Environment")
+    tool_idx = prompt.find("# Tool Usage Notes")
+    assert host_idx > bootstrap_idx
+    assert tool_idx > host_idx
+    assert "Streamlit shell paths" in prompt
 
 
 def test_default_memory_template_skipped(workspace: Path) -> None:
