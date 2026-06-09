@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import copy
-import ipaddress
 import json
 import locale
 import os
@@ -19,7 +18,6 @@ import platform
 import re
 import subprocess
 import uuid
-from urllib.parse import urlparse
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,6 +36,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from peas_agent.builtin_web import configure_web, web_fetch, web_search, web_tools_enabled
 from peas_agent.prompt_templates import (
     load_bundled_template,
     render_template,
@@ -82,6 +81,23 @@ def _default_config() -> dict[str, Any]:
             "model": "gpt-5.4-mini",
             "temperature": 0.2,
             "base_url": "https://api.openai.com/v1",
+        },
+        "tools": {
+            "web": {
+                "enable": True,
+                "proxy": None,
+                "userAgent": None,
+                "search": {
+                    "provider": "duckduckgo",
+                    "apiKey": "",
+                    "maxResults": 5,
+                    "timeout": 30,
+                },
+                "fetch": {
+                    "useJinaReader": True,
+                    "maxChars": 50000,
+                },
+            },
         },
     }
 
@@ -206,6 +222,7 @@ def _configure_runtime(workspace: Path, config: dict[str, Any]) -> None:
     global WORKSPACE, SKILLS_LOADER, TOOLS_LOADER, _ACTIVE_CONFIG
     WORKSPACE = workspace
     _ACTIVE_CONFIG = config
+    configure_web(config)
     _set_memory_paths(workspace)
     SKILLS_LOADER = SkillsLoader(
         workspace,
@@ -430,69 +447,18 @@ def exec_workspace(command: str, timeout: int = 30, cwd: str | None = None) -> s
         return f"Error: {e}"
 
 
-_BLOCKED_FETCH_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
-_MARKITDOWN: Any = None
-_DEFAULT_WEB_FETCH_MAX_CHARS = 8000
-
-
-def _get_markitdown() -> Any:
-    global _MARKITDOWN
-    if _MARKITDOWN is None:
-        from markitdown import MarkItDown
-
-        _MARKITDOWN = MarkItDown()
-    return _MARKITDOWN
-
-
-def _validate_fetch_url(url: str) -> tuple[str | None, str | None]:
-    cleaned = url.strip(" \t\r\n`\"'")
-    parsed = urlparse(cleaned)
-    if parsed.scheme not in ("http", "https"):
-        return None, f"Error: only http/https allowed, got {parsed.scheme or 'none'!r}"
-    if not parsed.netloc:
-        return None, "Error: missing domain"
-    host = parsed.hostname
-    if not host:
-        return None, "Error: missing hostname"
-    if host.lower() in _BLOCKED_FETCH_HOSTS:
-        return None, f"Error: blocked host: {host}"
-    try:
-        ip = ipaddress.ip_address(host)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            return None, f"Error: blocked address: {host}"
-    except ValueError:
-        pass
-    return cleaned, None
-
-
-def _extract_markitdown_text(result: Any) -> str:
-    for attr in ("text_content", "markdown"):
-        value = getattr(result, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return str(result).strip()
-
-
-@tool("web_fetch")
-def web_fetch(url: str, max_chars: int = _DEFAULT_WEB_FETCH_MAX_CHARS) -> str:
-    """抓取 http/https URL 並轉成 Markdown（MarkItDown）。登入牆或重度 JS 頁面可能失敗。"""
-    cleaned, err = _validate_fetch_url(url)
-    if err:
-        return err
-    try:
-        cap = max(100, int(max_chars))
-    except (TypeError, ValueError):
-        cap = _DEFAULT_WEB_FETCH_MAX_CHARS
-    try:
-        result = _get_markitdown().convert(cleaned)
-        text = _extract_markitdown_text(result)
-        if not text:
-            return f"Error: no content extracted from {cleaned}"
-        if len(text) > cap:
-            text = text[:cap] + f"\n\n[truncated at {cap} characters]"
-        return text
-    except Exception as e:
-        return f"Error: {e}"
+def _get_builtin_tools() -> list[Any]:
+    tools: list[Any] = [
+        add_numbers,
+        read_file,
+        write_file,
+        edit_file,
+        list_dir,
+        exec_workspace,
+    ]
+    if web_tools_enabled():
+        tools.extend([web_search, web_fetch])
+    return tools
 
 
 def _decode_process_output(data: bytes) -> str:
@@ -505,15 +471,7 @@ def _decode_process_output(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-BUILTIN_TOOLS = [
-    add_numbers,
-    read_file,
-    write_file,
-    edit_file,
-    list_dir,
-    exec_workspace,
-    web_fetch,
-]
+BUILTIN_TOOLS = _get_builtin_tools()
 
 _TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in BUILTIN_TOOLS}
 
@@ -526,7 +484,7 @@ def _rebuild_tool_registry(all_tools: list[Any]) -> None:
 def _load_all_tools() -> list[Any]:
     result = _tools_loader().load_all()
     warnings = list(result.warnings)
-    merged = merge_tools(BUILTIN_TOOLS, result.tools, warnings=warnings)
+    merged = merge_tools(_get_builtin_tools(), result.tools, warnings=warnings)
     for warning in warnings:
         print(f"（tools: {warning}）")
     _rebuild_tool_registry(merged)
