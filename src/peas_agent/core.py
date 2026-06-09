@@ -298,7 +298,7 @@ def _stream_model_response(
 # WG-14：workspace 檔案／shell `@tool`（追加至 WG-13 之 TOOLS）
 # ---------------------------------------------------------------------------
 
-WORKSPACE = Path.cwd().resolve()
+WORKSPACE = DEFAULT_WORKSPACE.expanduser().resolve()
 
 
 def resolve_workspace_path(path: str) -> Path:
@@ -524,7 +524,7 @@ def _rebuild_tool_registry(all_tools: list[Any]) -> None:
 
 
 def _load_all_tools() -> list[Any]:
-    result = TOOLS_LOADER.load_all()
+    result = _tools_loader().load_all()
     warnings = list(result.warnings)
     merged = merge_tools(BUILTIN_TOOLS, result.tools, warnings=warnings)
     for warning in warnings:
@@ -1245,7 +1245,6 @@ class SkillsLoader:
         self.workspace = workspace.resolve()
         self.workspace_skills = self.workspace / "skills"
         self.builtin_skills = (builtin_dir or PACKAGE_DIR / "builtin_skills").resolve()
-        self.workspace_skills.mkdir(parents=True, exist_ok=True)
 
     def _skill_path_for_read(self, skill_file: Path) -> str:
         resolved = skill_file.resolve()
@@ -1305,8 +1304,22 @@ def build_skills_summary(entries: list[SkillEntry]) -> str:
     return "\n".join(lines)
 
 
-SKILLS_LOADER = SkillsLoader(WORKSPACE, builtin_dir=PACKAGE_DIR / "builtin_skills")
-TOOLS_LOADER = ToolsLoader(WORKSPACE)
+SKILLS_LOADER: SkillsLoader | None = None
+TOOLS_LOADER: ToolsLoader | None = None
+
+_RUNTIME_NOT_CONFIGURED = "Agent runtime not configured; call Agent.create() first."
+
+
+def _skills_loader() -> SkillsLoader:
+    if SKILLS_LOADER is None:
+        raise RuntimeError(_RUNTIME_NOT_CONFIGURED)
+    return SKILLS_LOADER
+
+
+def _tools_loader() -> ToolsLoader:
+    if TOOLS_LOADER is None:
+        raise RuntimeError(_RUNTIME_NOT_CONFIGURED)
+    return TOOLS_LOADER
 
 
 def build_system_prompt() -> str:
@@ -1326,7 +1339,7 @@ def build_system_prompt() -> str:
     if mem:
         parts.append(mem)
 
-    entries = SKILLS_LOADER.list_skills()
+    entries = _skills_loader().list_skills()
     active = [e for e in entries if e.always]
     if active:
         body = "\n\n---\n\n".join(
@@ -1343,7 +1356,7 @@ def build_system_prompt() -> str:
         )
         parts.append("# Skills\n\n" + intro + summary)
 
-    tool_entries = TOOLS_LOADER.list_entries()
+    tool_entries = _tools_loader().list_entries()
     tools_summary = build_tools_summary(tool_entries)
     if tools_summary:
         tool_intro = (

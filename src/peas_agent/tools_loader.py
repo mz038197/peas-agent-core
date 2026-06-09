@@ -129,7 +129,6 @@ class ToolsLoader:
     def __init__(self, workspace: Path) -> None:
         self.workspace = workspace.resolve()
         self.tools_dir = self.workspace / "tools"
-        self.tools_dir.mkdir(parents=True, exist_ok=True)
         self._last_result: LoadResult | None = None
 
     def load_all(self) -> LoadResult:
