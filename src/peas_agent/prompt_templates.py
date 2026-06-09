@@ -56,6 +56,11 @@ def sync_workspace_templates(workspace: Path, *, silent: bool = False) -> list[s
 
     _write(_TEMPLATES_ROOT / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     (workspace / "skills").mkdir(exist_ok=True)
+    (workspace / "tools").mkdir(exist_ok=True)
+    _write(
+        _TEMPLATES_ROOT / "tools" / "example_calc" / "tool.py",
+        workspace / "tools" / "example_calc" / "tool.py",
+    )
 
     if added and not silent:
         for name in added:

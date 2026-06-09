@@ -9,6 +9,7 @@
 - 這個專案使用 **uv** 管理 Python 相依套件。請在專案根目錄使用 `exec uv add <package>` 安裝套件，不要使用 `pip install`。
 - 對於可重複執行的任務，優先使用 `write_file` 建立 `.py` 腳本，再用 `exec uv run python <相對路徑>` 執行。
 - 自訂 skill 放在 `skills/<name>/SKILL.md`。在遵循某個 skill 之前，先用 `read_file` 載入它。
+- 自訂 tool 放在 `tools/<name>.py` 或 `tools/<name>/tool.py`，使用 LangChain `@tool` 裝飾器定義。啟動時會自動載入並綁定為 function calling；修改後需重啟 agent。不可覆寫內建 tool 名稱（如 `read_file`、`exec`）。
 - 長期事實會在上下文預算管理期間自動彙整到 `memory/MEMORY.md`（WG-19）。不要把 MEMORY 當成暫時性任務狀態的草稿區。
 
 ## 檔案編輯

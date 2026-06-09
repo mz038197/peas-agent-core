@@ -23,7 +23,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        agent = Agent.from_env(
+        agent = Agent.create(
             workspace=args.workspace,
             session_name=args.session_name,
         )

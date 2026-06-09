@@ -45,7 +45,7 @@ uv run peas-agent -w ./my-workspace -s chat.jsonl
 ```python
 from peas_agent import Agent
 
-agent = Agent.from_env(workspace="./my-workspace", session_name="chat.jsonl")
+agent = Agent.create(workspace="./my-workspace", session_name="chat.jsonl")
 reply = agent.chat("你好")
 ```
 

@@ -9,6 +9,7 @@ Your default workspace is at: {{ workspace_path }}
 - History log: {{ workspace_path }}/memory/HISTORY.md
 - Custom skills: {{ workspace_path }}/skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
 - Builtin skills: {{ workspace_path }}/builtin_skills/{% raw %}{skill-name}{% endraw %}/SKILL.md
+- Custom tools: {{ workspace_path }}/tools/{% raw %}{tool-name}{% endraw %}.py or tools/{% raw %}{tool-name}{% endraw %}/tool.py
 
 {{ platform_policy }}
 
