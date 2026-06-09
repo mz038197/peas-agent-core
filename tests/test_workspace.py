@@ -80,6 +80,7 @@ def test_init_workspace_creates_subdirs(peas_home: Path) -> None:
     assert (ws / "memory").is_dir()
     assert (ws / "sessions").is_dir()
     assert (ws / "skills").is_dir()
+    assert (ws / "tools").is_dir()
     assert (ws / "AGENTS.md").is_file()
 
 

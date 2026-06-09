@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from peas_agent.core import (
-    TOOLS,
+    BUILTIN_TOOLS,
     _extract_markitdown_text,
     _validate_fetch_url,
     web_fetch,
@@ -16,7 +16,7 @@ from peas_agent.core import (
 
 
 def test_tools_include_web_fetch() -> None:
-    names = {t.name for t in TOOLS}
+    names = {t.name for t in BUILTIN_TOOLS}
     assert "web_fetch" in names
 
 

@@ -13,6 +13,7 @@ from peas_agent.core import (
     WORKSPACE,
     build_system_prompt,
 )
+from peas_agent.tools_loader import ToolsLoader
 from peas_agent.prompt_templates import load_bundled_template, sync_workspace_templates
 
 
@@ -28,6 +29,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "peas_agent.core.SKILLS_LOADER",
         SkillsLoader(root, builtin_dir=PACKAGE_DIR / "builtin_skills"),
     )
+    monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(root))
     monkeypatch.setattr("peas_agent.core._ACTIVE_CONFIG", {"token_budget": 100000})
     return root
 
