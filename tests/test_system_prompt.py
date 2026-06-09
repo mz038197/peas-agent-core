@@ -61,6 +61,7 @@ def test_tool_contract_always_injected(workspace: Path) -> None:
     prompt = build_system_prompt()
     assert "# Tool Usage Notes" in prompt
     assert "web_fetch" in prompt
+    assert "web_search" in prompt
 
 
 def test_build_system_prompt_order(workspace: Path) -> None:
