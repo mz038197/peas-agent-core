@@ -1,7 +1,7 @@
 [project]
 name = "peas-agent-core"
-version = "0.2.0"
-description = "PEAS Agent Workshop core — LangChain ReAct agent with workspace, memory, and skills"
+version = "0.2.1"
+description = "PEAS Agent Core — LangChain ReAct agent with workspace, memory, and skills"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
