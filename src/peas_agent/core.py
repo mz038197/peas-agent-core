@@ -93,10 +93,6 @@ def _default_config() -> dict[str, Any]:
                     "maxResults": 5,
                     "timeout": 30,
                 },
-                "fetch": {
-                    "useJinaReader": True,
-                    "maxChars": 50000,
-                },
             },
         },
     }

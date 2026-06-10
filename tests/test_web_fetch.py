@@ -9,6 +9,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from peas_agent import builtin_web
 from peas_agent.builtin_web import _run_web_fetch, configure_web, web_fetch
 from peas_agent.core import _get_builtin_tools
 
@@ -27,15 +28,8 @@ def _fake_resolve_localhost(hostname, port, family=0, type_=0):
 
 @pytest.fixture(autouse=True)
 def _web_config() -> None:
-    configure_web(
-        {
-            "tools": {
-                "web": {
-                    "fetch": {"useJinaReader": False, "maxChars": 50000},
-                }
-            }
-        }
-    )
+    configure_web({"tools": {"web": {}}})
+    builtin_web._WEB_SETTINGS.fetch.use_jina_reader = False
 
 
 def test_tools_include_web_fetch() -> None:
@@ -101,8 +95,7 @@ def test_web_fetch_result_contains_untrusted_flag() -> None:
     assert "Hello world" in data.get("text", "")
 
 
-def test_web_fetch_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
-    configure_web({"tools": {"web": {"fetch": {"useJinaReader": False, "maxChars": 100}}}})
+def test_web_fetch_truncates() -> None:
     fake_html = "<html><body>" + ("x" * 200) + "</body></html>"
 
     class FakeResponse:

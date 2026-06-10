@@ -53,7 +53,6 @@ def configure_web(config: dict[str, Any]) -> None:
     tools = config.get("tools") if isinstance(config.get("tools"), dict) else {}
     web = tools.get("web") if isinstance(tools.get("web"), dict) else {}
     search = web.get("search") if isinstance(web.get("search"), dict) else {}
-    fetch = web.get("fetch") if isinstance(web.get("fetch"), dict) else {}
 
     def _str(d: dict[str, Any], *keys: str, default: str = "") -> str:
         for key in keys:
@@ -87,10 +86,7 @@ def configure_web(config: dict[str, Any]) -> None:
             max_results=max(1, _int(search, "maxResults", "max_results", default=5)),
             timeout=max(1, _int(search, "timeout", default=30)),
         ),
-        fetch=WebFetchSettings(
-            use_jina_reader=_bool(fetch, "useJinaReader", "use_jina_reader", default=True),
-            max_chars=max(100, _int(fetch, "maxChars", "max_chars", default=50000)),
-        ),
+        fetch=WebFetchSettings(),
     )
 
 
