@@ -3,25 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from peas_agent import Agent, get_config_path, get_token_budget
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="PEAS Agent Workshop CLI")
-    parser.add_argument(
-        "-w",
-        "--workspace",
-        help="Agent workspace 路徑（覆寫 config.json 與預設 ~/.peas-agent/workspace）",
-    )
-    parser.add_argument(
-        "-s",
-        "--session",
-        dest="session_name",
-        help="Session 檔名（置於 workspace/sessions/；省略則使用 session.jsonl）",
-    )
-    args = parser.parse_args()
+def _run_lobby(argv: list[str]) -> int:
+    from peas_agent.lobby.cli import main as lobby_main
 
+    return lobby_main(argv)
+
+
+def _run_chat(args: argparse.Namespace) -> None:
     try:
         agent = Agent.create(
             workspace=args.workspace,
@@ -100,6 +93,26 @@ def main() -> None:
         print("\n助手：", end="", flush=True)
         agent.chat(user_text, image_path=image_rel)
         print()
+
+
+def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "lobby":
+        raise SystemExit(_run_lobby(sys.argv[2:]))
+
+    parser = argparse.ArgumentParser(description="PEAS Agent Workshop CLI")
+    parser.add_argument(
+        "-w",
+        "--workspace",
+        help="Agent workspace 路徑（覆寫 config.json 與預設 ~/.peas-agent/workspace）",
+    )
+    parser.add_argument(
+        "-s",
+        "--session",
+        dest="session_name",
+        help="Session 檔名（置於 workspace/sessions/；省略則使用 session.jsonl）",
+    )
+    args = parser.parse_args()
+    _run_chat(args)
 
 
 if __name__ == "__main__":
