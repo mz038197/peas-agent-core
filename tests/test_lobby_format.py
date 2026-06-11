@@ -15,6 +15,8 @@ def test_build_host_context_lists_members():
     assert "Alice" in ctx
     assert "Bob" in ctx
     assert "@display_name" in ctx
+    assert "請保持你原本的角色、語氣、專長與判斷方式" in ctx
+    assert "拋出一個和主題相關的問題" in ctx
 
 
 def test_build_user_text_inbox():
