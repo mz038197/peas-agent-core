@@ -2,63 +2,552 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Lobby {{ config.room_id }}</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
-    label { display: block; margin-top: 0.75rem; font-weight: 600; }
-    input[type=text], input[type=number], textarea { width: 100%; margin: 0.25rem 0; }
-    textarea { min-height: 80px; }
-    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
-    .members { background: #f5f5f5; padding: 0.75rem; border-radius: 6px; }
+    :root {
+      --color-obsidian: #000000;
+      --color-inkwell: #08080a;
+      --color-graphite: #121317;
+      --color-slate: #1c1d22;
+      --color-iron: #2e3038;
+      --color-steel: #464853;
+      --color-ash: #777a88;
+      --color-pearl: #acafb9;
+      --color-bone: #e2e3e9;
+      --color-paper: #ffffff;
+      --color-ember-gold: #cc9166;
+      --gradient-molten-gold: linear-gradient(103deg, rgb(174, 147, 87), rgb(255, 240, 204) 40%, rgb(174, 147, 87) 70%, rgba(189, 157, 79, 0));
+      --radius-sm: 2px;
+      --radius-lg: 10px;
+      --radius-full: 9999px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--color-obsidian);
+      color: var(--color-bone);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .shell {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 0 22px;
+      border-bottom: 1px solid var(--color-iron);
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      border: 1px solid var(--color-steel);
+      border-radius: var(--radius-sm);
+      color: var(--color-bone);
+      padding: 7px 12px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .back-link:hover { border-color: var(--color-ember-gold); }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 10px;
+      border: 1px solid var(--color-steel);
+      border-radius: var(--radius-full);
+      color: var(--color-pearl);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .tag.gold {
+      border-color: var(--color-ember-gold);
+      color: var(--color-ember-gold);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 24px;
+      align-items: stretch;
+      padding: 34px 0 24px;
+    }
+
+    .room-heading {
+      min-height: 250px;
+      padding: 28px;
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-lg);
+      background:
+        radial-gradient(circle at 82% 14%, rgba(204, 145, 102, 0.14), transparent 30%),
+        var(--color-inkwell);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    .eyebrow {
+      color: var(--color-ember-gold);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--color-paper);
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(44px, 7vw, 78px);
+      font-weight: 400;
+      line-height: 1;
+      overflow-wrap: anywhere;
+    }
+
+    h1 em {
+      color: var(--color-ember-gold);
+      font-style: italic;
+      font-weight: 400;
+    }
+
+    .subcopy {
+      max-width: 680px;
+      margin: 18px 0 0;
+      color: var(--color-pearl);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .panel {
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-lg);
+      background: var(--color-slate);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--color-iron);
+    }
+
+    .panel-title {
+      margin: 0;
+      color: var(--color-paper);
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1.3;
+    }
+
+    .panel-subtitle {
+      margin: 4px 0 0;
+      color: var(--color-ash);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .panel-body { padding: 20px; }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .metric {
+      min-height: 92px;
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-sm);
+      background: var(--color-inkwell);
+      padding: 14px;
+    }
+
+    .metric-label {
+      color: var(--color-ash);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .metric-value {
+      margin-top: 10px;
+      color: var(--color-paper);
+      font-size: 22px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-value.gold { color: var(--color-ember-gold); }
+
+    .gold-line {
+      height: 72px;
+      margin-top: 14px;
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-sm);
+      background: var(--gradient-molten-gold);
+      opacity: 0.6;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(280px, 0.75fr) minmax(0, 1.25fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .stack {
+      display: grid;
+      gap: 24px;
+    }
+
+    .member-list {
+      display: grid;
+      gap: 10px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .member-row,
+    .empty-state {
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-sm);
+      background: var(--color-inkwell);
+      padding: 13px 14px;
+    }
+
+    .member-name {
+      color: var(--color-paper);
+      font-size: 14px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .member-id {
+      margin-top: 4px;
+      color: var(--color-ash);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .empty-state {
+      color: var(--color-ash);
+      font-size: 14px;
+    }
+
+    form { margin: 0; }
+
+    label {
+      display: block;
+      margin: 0 0 8px;
+      color: var(--color-pearl);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    textarea,
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--color-steel);
+      border-radius: var(--radius-sm);
+      background: var(--color-graphite);
+      color: var(--color-paper);
+      padding: 12px 14px;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.45;
+      outline: none;
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    textarea:focus,
+    input[type="text"]:focus,
+    input[type="number"]:focus {
+      border-color: var(--color-ember-gold);
+    }
+
+    input::placeholder { color: var(--color-ash); }
+
+    .number-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .toggle-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin: 4px 0 18px;
+    }
+
+    .toggle {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      min-height: 48px;
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-sm);
+      background: var(--color-inkwell);
+      padding: 12px;
+      color: var(--color-bone);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.35;
+    }
+
+    .toggle input {
+      width: 16px;
+      height: 16px;
+      margin: 1px 0 0;
+      accent-color: var(--color-ember-gold);
+      flex: 0 0 auto;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    button {
+      min-height: 42px;
+      border: 1px solid var(--color-paper);
+      border-radius: var(--radius-sm);
+      background: var(--color-paper);
+      color: var(--color-inkwell);
+      padding: 0 18px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .broadcast-row {
+      display: flex;
+      gap: 0;
+      align-items: stretch;
+    }
+
+    .broadcast-row input {
+      height: 44px;
+      border-right: 0;
+      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    }
+
+    .broadcast-row button {
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+
+    @media (max-width: 900px) {
+      .hero,
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .room-heading {
+        min-height: 220px;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(100vw - 24px, 1180px);
+        padding-top: 18px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .room-heading,
+      .panel-body,
+      .panel-header {
+        padding: 16px;
+      }
+
+      .status-grid,
+      .number-grid,
+      .toggle-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .broadcast-row {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .broadcast-row input,
+      .broadcast-row button {
+        border: 1px solid var(--color-steel);
+        border-radius: var(--radius-sm);
+      }
+
+      .broadcast-row button {
+        border-color: var(--color-paper);
+      }
+    }
   </style>
 </head>
 <body>
-  <p><a href="/admin">← 返回</a></p>
-  <h1>聊天室：{{ config.room_id }}</h1>
+  <main class="shell">
+    <header class="topbar">
+      <a class="back-link" href="/admin">返回 Lobby</a>
+      <span class="tag gold">Room Control</span>
+    </header>
 
-  <div class="members">
-    <strong>在線成員</strong>
-    <ul>
-      {% for m in members %}
-      <li>{{ m.display_name }} ({{ m.agent_id }})</li>
-      {% else %}
-      <li>（無）</li>
-      {% endfor %}
-    </ul>
-    <p>目前發言者：{{ room.current_speaker or "—" }}</p>
-  </div>
-
-  <form method="post" action="/admin/rooms/{{ config.room_id }}/config">
-    <label>主題 topic</label>
-    <textarea name="topic">{{ config.topic }}</textarea>
-
-    <label>規則 rules</label>
-    <textarea name="rules">{{ config.rules }}</textarea>
-
-    <div class="row">
-      <div>
-        <label>單次發言逾時 turn_timeout_sec</label>
-        <input type="number" name="turn_timeout_sec" value="{{ config.turn_timeout_sec }}" min="1" max="600" />
+    <section class="hero">
+      <div class="room-heading">
+        <div class="eyebrow">ROOM</div>
+        <h1>{{ config.room_id }} <em>control</em>.</h1>
+        <p class="subcopy">管理討論主題、發言節奏、@mention 與老師廣播。學生 agent 加入後會出現在在線成員清單。</p>
       </div>
-      <div>
-        <label>發言間隔 turn_gap_sec</label>
-        <input type="number" name="turn_gap_sec" value="{{ config.turn_gap_sec }}" min="0" max="300" />
+
+      <section class="panel" aria-labelledby="status-title">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title" id="status-title">Live Status</h2>
+            <p class="panel-subtitle">目前 room 狀態與發言權。</p>
+          </div>
+          <span class="tag">{{ "Paused" if config.paused else "Active" }}</span>
+        </div>
+        <div class="panel-body">
+          <div class="status-grid">
+            <div class="metric">
+              <div class="metric-label">Members</div>
+              <div class="metric-value">{{ members|length }}</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Current speaker</div>
+              <div class="metric-value gold">{{ room.current_speaker or "—" }}</div>
+            </div>
+          </div>
+          <div class="gold-line" aria-hidden="true"></div>
+        </div>
+      </section>
+    </section>
+
+    <section class="workspace">
+      <div class="stack">
+        <section class="panel" aria-labelledby="members-title">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title" id="members-title">在線成員</h2>
+              <p class="panel-subtitle">已加入此 room 的 agent。</p>
+            </div>
+            <span class="tag">{{ members|length }} online</span>
+          </div>
+          <div class="panel-body">
+            <ul class="member-list">
+              {% for m in members %}
+              <li class="member-row">
+                <div class="member-name">{{ m.display_name }}</div>
+                <div class="member-id">{{ m.agent_id }}</div>
+              </li>
+              {% else %}
+              <li class="empty-state">目前沒有在線成員。</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="broadcast-title">
+          <div class="panel-header">
+            <div>
+              <h2 class="panel-title" id="broadcast-title">老師廣播</h2>
+              <p class="panel-subtitle">送出一則系統訊息到 room。</p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <form method="post" action="/admin/rooms/{{ config.room_id }}/broadcast">
+              <label for="broadcast-text">message</label>
+              <div class="broadcast-row">
+                <input id="broadcast-text" type="text" name="text" placeholder="請大家先自介..." />
+                <button type="submit">送出廣播</button>
+              </div>
+            </form>
+          </div>
+        </section>
       </div>
-    </div>
 
-    <label><input type="checkbox" name="mention_enabled" {% if config.mention_enabled %}checked{% endif %} /> 啟用 @mention</label>
-    <label><input type="checkbox" name="round_robin_enabled" {% if config.round_robin_enabled %}checked{% endif %} /> 無 @ 時 round-robin</label>
-    <label><input type="checkbox" name="auto_start_on_first_join" {% if config.auto_start_on_first_join %}checked{% endif %} /> 第一人 join 自動開始</label>
-    <label><input type="checkbox" name="skip_gap_on_first_grant" {% if config.skip_gap_on_first_grant %}checked{% endif %} /> 第一次 grant 跳過間隔</label>
-    <label><input type="checkbox" name="paused" {% if config.paused %}checked{% endif %} /> 暫停討論</label>
+      <section class="panel" aria-labelledby="config-title">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title" id="config-title">房間設定</h2>
+            <p class="panel-subtitle">調整任務文字與發言排程。</p>
+          </div>
+        </div>
+        <div class="panel-body">
+          <form method="post" action="/admin/rooms/{{ config.room_id }}/config">
+            <div class="field">
+              <label for="topic">主題 topic</label>
+              <textarea id="topic" name="topic">{{ config.topic }}</textarea>
+            </div>
 
-    <p><button type="submit">儲存設定</button></p>
-  </form>
+            <div class="field">
+              <label for="rules">規則 rules</label>
+              <textarea id="rules" name="rules">{{ config.rules }}</textarea>
+            </div>
 
-  <form method="post" action="/admin/rooms/{{ config.room_id }}/broadcast">
-    <label>老師廣播</label>
-    <input type="text" name="text" placeholder="請大家先自介…" />
-    <button type="submit">送出廣播</button>
-  </form>
+            <div class="number-grid">
+              <div class="field">
+                <label for="turn_timeout_sec">單次發言逾時 turn_timeout_sec</label>
+                <input id="turn_timeout_sec" type="number" name="turn_timeout_sec" value="{{ config.turn_timeout_sec }}" min="1" max="600" />
+              </div>
+              <div class="field">
+                <label for="turn_gap_sec">發言間隔 turn_gap_sec</label>
+                <input id="turn_gap_sec" type="number" name="turn_gap_sec" value="{{ config.turn_gap_sec }}" min="0" max="300" />
+              </div>
+            </div>
+
+            <div class="toggle-grid">
+              <label class="toggle"><input type="checkbox" name="mention_enabled" {% if config.mention_enabled %}checked{% endif %} /> 啟用 @mention</label>
+              <label class="toggle"><input type="checkbox" name="round_robin_enabled" {% if config.round_robin_enabled %}checked{% endif %} /> 無 @ 時 round-robin</label>
+              <label class="toggle"><input type="checkbox" name="auto_start_on_first_join" {% if config.auto_start_on_first_join %}checked{% endif %} /> 第一人 join 自動開始</label>
+              <label class="toggle"><input type="checkbox" name="skip_gap_on_first_grant" {% if config.skip_gap_on_first_grant %}checked{% endif %} /> 第一次 grant 跳過間隔</label>
+              <label class="toggle"><input type="checkbox" name="paused" {% if config.paused %}checked{% endif %} /> 暫停討論</label>
+            </div>
+
+            <div class="actions">
+              <button type="submit">儲存設定</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </section>
+  </main>
 </body>
 </html>
