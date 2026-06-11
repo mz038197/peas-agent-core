@@ -5,11 +5,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Form, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from peas_agent.lobby.paths import ensure_lobby_dirs
+from peas_agent.lobby.paths import InvalidRoomIdError, ensure_lobby_dirs, validate_room_id
 from peas_agent.lobby.protocol import JoinMessage, PassMessage, RoomConfig, SayMessage, TurnDoneMessage, parse_client_message
 from peas_agent.lobby.server.registry import RoomRegistry
 from peas_agent.lobby.server.storage import list_room_ids, save_room_config
@@ -58,6 +58,7 @@ def create_app(workspace: Path) -> FastAPI:
     hub = ConnectionHub()
 
     app = FastAPI(title="PEAS Agent Lobby")
+    app.state.hub = hub
     templates_dir = Path(__file__).parent / "admin" / "templates"
     templates = Jinja2Templates(directory=str(templates_dir))
 
@@ -75,6 +76,12 @@ def create_app(workspace: Path) -> FastAPI:
     for room in registry.rooms.values():
         wire_room(room)
 
+    def _require_room_id(room_id: str) -> str:
+        try:
+            return validate_room_id(room_id)
+        except InvalidRoomIdError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @app.get("/admin", response_class=HTMLResponse)
     async def admin_index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -85,6 +92,7 @@ def create_app(workspace: Path) -> FastAPI:
 
     @app.get("/admin/rooms/{room_id}", response_class=HTMLResponse)
     async def admin_room(request: Request, room_id: str) -> HTMLResponse:
+        room_id = _require_room_id(room_id)
         room = registry.get_or_create(room_id)
         wire_room(room)
         return templates.TemplateResponse(
@@ -110,6 +118,7 @@ def create_app(workspace: Path) -> FastAPI:
         skip_gap_on_first_grant: str | None = Form(None),
         paused: str | None = Form(None),
     ) -> RedirectResponse:
+        room_id = _require_room_id(room_id)
         config = RoomConfig(
             room_id=room_id,
             topic=topic,
@@ -130,8 +139,9 @@ def create_app(workspace: Path) -> FastAPI:
 
     @app.post("/admin/rooms/create")
     async def admin_create_room(room_id: str = Form(...)) -> RedirectResponse:
-        room_id = room_id.strip()
-        if not room_id:
+        try:
+            room_id = validate_room_id(room_id)
+        except InvalidRoomIdError:
             return RedirectResponse(url="/admin", status_code=303)
         config = RoomConfig(room_id=room_id)
         save_room_config(workspace, config)
@@ -141,6 +151,7 @@ def create_app(workspace: Path) -> FastAPI:
 
     @app.post("/admin/rooms/{room_id}/broadcast")
     async def admin_broadcast(room_id: str, text: str = Form(...)) -> RedirectResponse:
+        room_id = _require_room_id(room_id)
         room = registry.get_or_create(room_id)
         wire_room(room)
         await room.broadcast_system(text.strip())
@@ -159,9 +170,22 @@ def create_app(workspace: Path) -> FastAPI:
                 msg = parse_client_message(json.loads(raw))
 
                 if isinstance(msg, JoinMessage):
-                    joined_room_id = msg.room_id
-                    hub.add(joined_room_id, connection_id, ws)
-                    room = registry.get_or_create(joined_room_id)
+                    try:
+                        validate_room_id(msg.room_id)
+                    except InvalidRoomIdError as exc:
+                        await ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "join_rejected",
+                                    "reason": "invalid_room_id",
+                                    "message": str(exc),
+                                },
+                                ensure_ascii=False,
+                            )
+                        )
+                        continue
+
+                    room = registry.get_or_create(msg.room_id)
                     wire_room(room)
                     result = await room.handle_join(
                         connection_id,
@@ -170,6 +194,8 @@ def create_app(workspace: Path) -> FastAPI:
                     )
                     await ws.send_text(json.dumps(result, ensure_ascii=False))
                     if result.get("type") == "join_ok":
+                        joined_room_id = msg.room_id
+                        hub.add(joined_room_id, connection_id, ws)
                         agent_id = result["agent_id"]
                         await room.send_room_config(connection_id)
                         await room.publish_members()

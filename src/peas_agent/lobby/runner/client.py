@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -72,8 +73,15 @@ class LobbyRunner:
             )
 
             while True:
-                raw = await ws.recv()
-                await self._handle_event(ws, json.loads(raw))
+                try:
+                    raw = await ws.recv()
+                    await self._handle_event(ws, json.loads(raw))
+                except websockets.exceptions.ConnectionClosed:
+                    break
+                except json.JSONDecodeError as exc:
+                    print(f"[runner_error] invalid event json: {exc}", file=sys.stderr)
+                except Exception as exc:
+                    print(f"[runner_error] {exc}", file=sys.stderr)
         return 0
 
     async def _handle_event(self, ws: Any, event: dict[str, Any]) -> None:
@@ -109,22 +117,38 @@ class LobbyRunner:
                 return
             hint = event.get("prompt_hint")
             print(f"[turn_granted] turn_no={event.get('turn_no')} hint={hint}")
-            reply = await asyncio.to_thread(self._chat_turn, hint)
-            text = (reply or "").strip()
-            if not text or text == "[pass]":
-                await ws.send(json.dumps({"type": "pass"}, ensure_ascii=False))
-                print("[pass]")
-            else:
-                await ws.send(json.dumps({"type": "say", "text": text}, ensure_ascii=False))
-                print(f"[say] {text[:120]}{'…' if len(text) > 120 else ''}")
-            await ws.send(json.dumps({"type": "turn_done"}, ensure_ascii=False))
-            print("[turn_done]")
+            try:
+                reply = await asyncio.to_thread(self._chat_turn, hint)
+            except Exception as exc:
+                print(f"[turn_error] {exc}", file=sys.stderr)
+                await self._send_turn_response(ws, text=None, error_fallback=True)
+                return
+            await self._send_turn_response(ws, text=(reply or "").strip())
             return
 
         if kind == "turn_revoked":
             if event.get("agent_id") == self.agent_id:
                 print("[turn_revoked] 逾時")
             return
+
+    async def _send_turn_response(
+        self,
+        ws: Any,
+        *,
+        text: str | None,
+        error_fallback: bool = False,
+    ) -> None:
+        if not text or text == "[pass]":
+            await ws.send(json.dumps({"type": "pass"}, ensure_ascii=False))
+            if error_fallback:
+                print("[pass] (error fallback)")
+            else:
+                print("[pass]")
+        else:
+            await ws.send(json.dumps({"type": "say", "text": text}, ensure_ascii=False))
+            print(f"[say] {text[:120]}{'…' if len(text) > 120 else ''}")
+        await ws.send(json.dumps({"type": "turn_done"}, ensure_ascii=False))
+        print("[turn_done]")
 
     def _chat_turn(self, prompt_hint: str | None) -> str:
         host = build_host_context(

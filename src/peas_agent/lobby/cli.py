@@ -51,11 +51,18 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_join(args: argparse.Namespace) -> int:
+    from peas_agent.lobby.paths import InvalidRoomIdError, validate_room_id
     from peas_agent.lobby.runner.client import LobbyRunner
+
+    try:
+        room_id = validate_room_id(args.room)
+    except InvalidRoomIdError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     runner = LobbyRunner(
         ws_url=args.url,
-        room_id=args.room,
+        room_id=room_id,
         display_name=args.display_name,
         workspace=args.workspace,
     )

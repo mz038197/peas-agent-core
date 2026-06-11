@@ -94,10 +94,18 @@ class Room:
         if rejoin_token:
             for member in self.members.values():
                 if member.rejoin_token == rejoin_token:
+                    old_connection_id = member.connection_id
+                    if old_connection_id != connection_id:
+                        self.connection_index.pop(old_connection_id, None)
                     member.connection_id = connection_id
                     member.online = True
                     self.connection_index[connection_id] = member.agent_id
                     return self._join_ok(member)
+            return {
+                "type": "join_rejected",
+                "reason": "invalid_rejoin_token",
+                "message": "rejoin_token 無效，請勿帶 token 並提供 display_name 重新加入。",
+            }
 
         if not display_name or not display_name.strip():
             return {
@@ -156,8 +164,9 @@ class Room:
         if not agent_id:
             return
         member = self.members.get(agent_id)
-        if member:
-            member.online = False
+        if not member or member.connection_id != connection_id:
+            return
+        member.online = False
         if self.current_speaker == agent_id:
             await self._cancel_timeout()
             self.current_speaker = None
@@ -183,12 +192,15 @@ class Room:
         self._enqueue_from_text(text, speaker_id=agent_id)
 
     def _enqueue_from_text(self, text: str, *, speaker_id: str) -> None:
+        mentioned: list[str] = []
         if self.config.mention_enabled:
-            targets = parse_mentions(text, display_name_to_agent_id=self.display_name_map())
-            targets = [t for t in targets if t != speaker_id and self._is_online(t)]
-            if targets:
-                self.speak_queue.extend(targets)
-                return
+            mentioned = parse_mentions(text, display_name_to_agent_id=self.display_name_map())
+            mentioned = [t for t in mentioned if t != speaker_id and self._is_online(t)]
+
+        if mentioned:
+            self.speak_queue.extend(mentioned)
+            return
+
         if self.config.round_robin_enabled:
             nxt = self._round_robin_next(exclude=speaker_id)
             if nxt:

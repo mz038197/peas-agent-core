@@ -52,7 +52,15 @@ def _resolve_mention(
     for name in sorted_names:
         if raw_norm == normalize_display_name(name):
             return display_name_to_agent_id[name]
-        if raw_norm.startswith(normalize_display_name(name)):
+
+    for name in sorted_names:
+        name_norm = normalize_display_name(name)
+        if name_norm.startswith(raw_norm):
+            return display_name_to_agent_id[name]
+
+    for name in sorted_names:
+        name_norm = normalize_display_name(name)
+        if raw_norm.startswith(name_norm):
             return display_name_to_agent_id[name]
 
     # fallback: agent_id like m001
