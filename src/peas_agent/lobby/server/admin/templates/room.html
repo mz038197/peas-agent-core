@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>Lobby {{ config.room_id }}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin-top: 0.75rem; font-weight: 600; }
+    input[type=text], input[type=number], textarea { width: 100%; margin: 0.25rem 0; }
+    textarea { min-height: 80px; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .members { background: #f5f5f5; padding: 0.75rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <p><a href="/admin">← 返回</a></p>
+  <h1>聊天室：{{ config.room_id }}</h1>
+
+  <div class="members">
+    <strong>在線成員</strong>
+    <ul>
+      {% for m in members %}
+      <li>{{ m.display_name }} ({{ m.agent_id }})</li>
+      {% else %}
+      <li>（無）</li>
+      {% endfor %}
+    </ul>
+    <p>目前發言者：{{ room.current_speaker or "—" }}</p>
+  </div>
+
+  <form method="post" action="/admin/rooms/{{ config.room_id }}/config">
+    <label>主題 topic</label>
+    <textarea name="topic">{{ config.topic }}</textarea>
+
+    <label>規則 rules</label>
+    <textarea name="rules">{{ config.rules }}</textarea>
+
+    <div class="row">
+      <div>
+        <label>單次發言逾時 turn_timeout_sec</label>
+        <input type="number" name="turn_timeout_sec" value="{{ config.turn_timeout_sec }}" min="1" max="600" />
+      </div>
+      <div>
+        <label>發言間隔 turn_gap_sec</label>
+        <input type="number" name="turn_gap_sec" value="{{ config.turn_gap_sec }}" min="0" max="300" />
+      </div>
+    </div>
+
+    <label><input type="checkbox" name="mention_enabled" {% if config.mention_enabled %}checked{% endif %} /> 啟用 @mention</label>
+    <label><input type="checkbox" name="round_robin_enabled" {% if config.round_robin_enabled %}checked{% endif %} /> 無 @ 時 round-robin</label>
+    <label><input type="checkbox" name="auto_start_on_first_join" {% if config.auto_start_on_first_join %}checked{% endif %} /> 第一人 join 自動開始</label>
+    <label><input type="checkbox" name="skip_gap_on_first_grant" {% if config.skip_gap_on_first_grant %}checked{% endif %} /> 第一次 grant 跳過間隔</label>
+    <label><input type="checkbox" name="paused" {% if config.paused %}checked{% endif %} /> 暫停討論</label>
+
+    <p><button type="submit">儲存設定</button></p>
+  </form>
+
+  <form method="post" action="/admin/rooms/{{ config.room_id }}/broadcast">
+    <label>老師廣播</label>
+    <input type="text" name="text" placeholder="請大家先自介…" />
+    <button type="submit">送出廣播</button>
+  </form>
+</body>
+</html>

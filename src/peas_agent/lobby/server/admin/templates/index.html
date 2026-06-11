@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>PEAS Lobby 管理</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    input, textarea { width: 100%; margin: 0.25rem 0 1rem; }
+    button { padding: 0.4rem 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>PEAS Lobby 管理</h1>
+  <h2>建立聊天室</h2>
+  <form method="post" action="/admin/rooms/create">
+    <label>room_id</label>
+    <input name="room_id" placeholder="MATH-2026" required />
+    <button type="submit">建立</button>
+  </form>
+  <h2>既有聊天室</h2>
+  <ul>
+    {% for rid in room_ids %}
+    <li><a href="/admin/rooms/{{ rid }}">{{ rid }}</a></li>
+    {% else %}
+    <li>（尚無）</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
