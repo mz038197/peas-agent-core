@@ -12,6 +12,7 @@ from typing import Any
 from peas_agent.lobby.mentions import normalize_display_name, parse_mentions
 from peas_agent.lobby.paths import room_log_path
 from peas_agent.lobby.protocol import MemberInfo, RoomConfig
+from peas_agent.lobby.server.storage import save_room_config
 
 
 BroadcastFn = Callable[..., Awaitable[None]]
@@ -159,6 +160,32 @@ class Room:
         self.config = config
         await self.emit_all({"type": "room_config_updated", **self.config.to_dict()})
 
+    async def start_discussion(self) -> dict[str, Any]:
+        if self.config.discussion_started:
+            return {"ok": False, "reason": "already_started"}
+        if not self.member_list():
+            return {"ok": False, "reason": "no_members"}
+        first = self._round_robin_next()
+        if not first:
+            return {"ok": False, "reason": "no_members"}
+        self.config.discussion_started = True
+        save_room_config(self.workspace, self.config)
+        await self.emit_all(
+            {
+                "type": "discussion_started",
+                "room_id": self.config.room_id,
+            }
+        )
+        await self.grant_turn(first, skip_gap=self.config.skip_gap_on_first_grant)
+        return {"ok": True, "agent_id": first}
+
+    async def shutdown(self) -> None:
+        await self._cancel_gap()
+        await self._cancel_timeout()
+        self.current_speaker = None
+        self.speak_queue.clear()
+        self.pending_next_id = None
+
     async def disconnect(self, connection_id: str) -> None:
         agent_id = self.connection_index.pop(connection_id, None)
         if not agent_id:
@@ -179,14 +206,23 @@ class Room:
         member = self.members.get(agent_id)
         if not member:
             return
-        await self._append_log(agent_id, member.display_name, text)
+        ts = datetime.now(UTC).isoformat()
+        await self._append_timeline(
+            {
+                "kind": "message",
+                "from": agent_id,
+                "display_name": member.display_name,
+                "text": text,
+                "ts": ts,
+            }
+        )
         await self.emit_all(
             {
                 "type": "message",
                 "from": agent_id,
                 "display_name": member.display_name,
                 "text": text,
-                "ts": datetime.now(UTC).isoformat(),
+                "ts": ts,
             }
         )
         self._enqueue_from_text(text, speaker_id=agent_id)
@@ -234,7 +270,7 @@ class Room:
         await self.handle_turn_done(agent_id)
 
     async def _schedule_next(self) -> None:
-        if self.config.paused:
+        if self.config.paused or not self.config.discussion_started:
             return
         await self._cancel_gap()
         if not self.speak_queue and self.config.round_robin_enabled:
@@ -253,14 +289,23 @@ class Room:
             return
         member = self.members[next_id]
         self.pending_next_id = next_id
-        await self.emit_all(
+        ts = datetime.now(UTC).isoformat()
+        pending_event = {
+            "type": "turn_pending",
+            "next_agent_id": next_id,
+            "next_display_name": member.display_name,
+            "gap_sec": gap,
+        }
+        await self._append_timeline(
             {
-                "type": "turn_pending",
+                "kind": "turn_pending",
                 "next_agent_id": next_id,
                 "next_display_name": member.display_name,
                 "gap_sec": gap,
+                "ts": ts,
             }
         )
+        await self.emit_all(pending_event)
 
         async def _after_gap() -> None:
             try:
@@ -273,7 +318,7 @@ class Room:
         self._gap_task = asyncio.create_task(_after_gap())
 
     async def grant_turn(self, agent_id: str, *, skip_gap: bool = False) -> None:
-        if self.config.paused or not self._is_online(agent_id):
+        if self.config.paused or not self.config.discussion_started or not self._is_online(agent_id):
             return
         await self._cancel_gap()
         await self._cancel_timeout()
@@ -283,6 +328,7 @@ class Room:
             self.first_grant_done = True
         member = self.members[agent_id]
         hint = f"輪到你了，請針對聊天室討論發表看法。"
+        ts = datetime.now(UTC).isoformat()
         event = {
             "type": "turn_granted",
             "room_id": self.config.room_id,
@@ -292,19 +338,38 @@ class Room:
             "deadline_sec": self.config.turn_timeout_sec,
             "prompt_hint": hint,
         }
+        await self._append_timeline(
+            {
+                "kind": "turn_granted",
+                "agent_id": agent_id,
+                "display_name": member.display_name,
+                "turn_no": self.turn_no,
+                "ts": ts,
+            }
+        )
         await self.emit_all(event)
 
         async def _on_timeout() -> None:
             try:
                 await asyncio.sleep(self.config.turn_timeout_sec)
                 if self.current_speaker == agent_id:
-                    await self.emit_all(
+                    revoked_member = self.members.get(agent_id)
+                    revoked_event = {
+                        "type": "turn_revoked",
+                        "agent_id": agent_id,
+                        "reason": "timeout",
+                        "display_name": revoked_member.display_name if revoked_member else "",
+                    }
+                    await self._append_timeline(
                         {
-                            "type": "turn_revoked",
+                            "kind": "turn_revoked",
                             "agent_id": agent_id,
+                            "display_name": revoked_member.display_name if revoked_member else "",
                             "reason": "timeout",
+                            "ts": datetime.now(UTC).isoformat(),
                         }
                     )
+                    await self.emit_all(revoked_event)
                     self.current_speaker = None
                     await self._schedule_next()
             except asyncio.CancelledError:
@@ -331,28 +396,32 @@ class Room:
                 pass
         self._timeout_task = None
 
-    async def _append_log(self, agent_id: str, display_name: str, text: str) -> None:
+    async def _append_timeline(self, entry: dict[str, Any]) -> None:
         path = room_log_path(self.workspace, self.config.room_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(
-            {
-                "from": agent_id,
-                "display_name": display_name,
-                "text": text,
-                "ts": datetime.now(UTC).isoformat(),
-            },
-            ensure_ascii=False,
-        )
+        if "ts" not in entry:
+            entry = {**entry, "ts": datetime.now(UTC).isoformat()}
+        line = json.dumps(entry, ensure_ascii=False)
         with path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
     async def broadcast_system(self, text: str) -> None:
+        ts = datetime.now(UTC).isoformat()
+        await self._append_timeline(
+            {
+                "kind": "message",
+                "from": "system",
+                "display_name": "主持人",
+                "text": text,
+                "ts": ts,
+            }
+        )
         await self.emit_all(
             {
                 "type": "message",
                 "from": "system",
                 "display_name": "主持人",
                 "text": text,
-                "ts": datetime.now(UTC).isoformat(),
+                "ts": ts,
             }
         )

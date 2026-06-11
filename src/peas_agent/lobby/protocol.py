@@ -14,7 +14,7 @@ class RoomConfig:
     turn_gap_sec: int = 5
     mention_enabled: bool = True
     round_robin_enabled: bool = True
-    auto_start_on_first_join: bool = True
+    discussion_started: bool = False
     skip_gap_on_first_grant: bool = True
     paused: bool = False
 

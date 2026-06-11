@@ -96,6 +96,22 @@ class LobbyRunner:
             print(f"[inbox] {entry['display_name']}: {entry['text']}")
             return
 
+        if kind == "message_history":
+            for item in event.get("messages", []):
+                entry = {
+                    "from": item.get("from", ""),
+                    "display_name": item.get("display_name", ""),
+                    "text": item.get("text", ""),
+                }
+                self.inbox.append(entry)
+            if self.inbox:
+                print(f"[message_history] replayed {len(event.get('messages', []))} messages")
+            return
+
+        if kind == "discussion_started":
+            print(f"[discussion_started] room={event.get('room_id')}")
+            return
+
         if kind in ("room_config", "room_config_updated"):
             payload = {k: v for k, v in event.items() if k != "type"}
             self.room_config = RoomConfig.from_dict(payload)

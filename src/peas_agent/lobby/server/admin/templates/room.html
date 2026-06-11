@@ -371,6 +371,63 @@
       border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     }
 
+    .discussion-log {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 420px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .discussion-entry {
+      border: 1px solid var(--color-iron);
+      border-radius: var(--radius-sm);
+      background: var(--color-inkwell);
+      padding: 10px 12px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .discussion-entry.system {
+      border-style: dashed;
+      color: var(--color-pearl);
+      background: rgba(8, 8, 10, 0.72);
+    }
+
+    .discussion-entry.system-host {
+      border-color: var(--color-ember-gold);
+    }
+
+    .discussion-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: baseline;
+      margin-bottom: 4px;
+      color: var(--color-ash);
+      font-size: 11px;
+    }
+
+    .discussion-name {
+      color: var(--color-paper);
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .discussion-text {
+      color: var(--color-bone);
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .ws-status {
+      font-size: 11px;
+      color: var(--color-ash);
+    }
+
+    .ws-status.live { color: var(--color-ember-gold); }
+
     @media (max-width: 900px) {
       .hero,
       .workspace {
@@ -442,18 +499,28 @@
             <h2 class="panel-title" id="status-title">Live Status</h2>
             <p class="panel-subtitle">目前 room 狀態與發言權。</p>
           </div>
-          <span class="tag">{{ "Paused" if config.paused else "Active" }}</span>
+          <span class="tag" id="room-status-tag">{% if not config.discussion_started %}Waiting{% elif config.paused %}Paused{% else %}Active{% endif %}</span>
         </div>
         <div class="panel-body">
           <div class="status-grid">
             <div class="metric">
               <div class="metric-label">Members</div>
-              <div class="metric-value">{{ members|length }}</div>
+              <div class="metric-value" id="member-count">{{ members|length }}</div>
             </div>
             <div class="metric">
               <div class="metric-label">Current speaker</div>
-              <div class="metric-value gold">{{ room.current_speaker or "—" }}</div>
+              <div class="metric-value gold" id="current-speaker">{{ room.current_speaker or "—" }}</div>
             </div>
+          </div>
+          <div class="actions" style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
+            {% if not config.discussion_started %}
+            <form method="post" action="/admin/rooms/{{ config.room_id }}/start">
+              <button type="submit">開始討論</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/admin/rooms/{{ config.room_id }}/delete" onsubmit="return confirm('確定刪除此聊天室？設定與紀錄將一併移除。');">
+              <button type="submit" style="border-color: var(--color-steel); background: transparent; color: var(--color-pearl);">刪除聊天室</button>
+            </form>
           </div>
           <div class="gold-line" aria-hidden="true"></div>
         </div>
@@ -468,10 +535,10 @@
               <h2 class="panel-title" id="members-title">在線成員</h2>
               <p class="panel-subtitle">已加入此 room 的 agent。</p>
             </div>
-            <span class="tag">{{ members|length }} online</span>
+            <span class="tag" id="member-tag">{{ members|length }} online</span>
           </div>
           <div class="panel-body">
-            <ul class="member-list">
+            <ul class="member-list" id="live-member-list">
               {% for m in members %}
               <li class="member-row">
                 <div class="member-name">{{ m.display_name }}</div>
@@ -536,7 +603,6 @@
             <div class="toggle-grid">
               <label class="toggle"><input type="checkbox" name="mention_enabled" {% if config.mention_enabled %}checked{% endif %} /> 啟用 @mention</label>
               <label class="toggle"><input type="checkbox" name="round_robin_enabled" {% if config.round_robin_enabled %}checked{% endif %} /> 無 @ 時 round-robin</label>
-              <label class="toggle"><input type="checkbox" name="auto_start_on_first_join" {% if config.auto_start_on_first_join %}checked{% endif %} /> 第一人 join 自動開始</label>
               <label class="toggle"><input type="checkbox" name="skip_gap_on_first_grant" {% if config.skip_gap_on_first_grant %}checked{% endif %} /> 第一次 grant 跳過間隔</label>
               <label class="toggle"><input type="checkbox" name="paused" {% if config.paused %}checked{% endif %} /> 暫停討論</label>
             </div>
@@ -548,6 +614,193 @@
         </div>
       </section>
     </section>
+
+    <section class="panel" aria-labelledby="discussion-title" style="margin-top: 24px;">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title" id="discussion-title">即時討論</h2>
+          <p class="panel-subtitle">學生發言、老師廣播與輪次事件。</p>
+        </div>
+        <span class="ws-status" id="ws-status">連線中…</span>
+      </div>
+      <div class="panel-body">
+        <div class="discussion-log" id="discussion-log">
+          <div class="empty-state">等待連線…</div>
+        </div>
+      </div>
+    </section>
   </main>
+  <script>
+    (function () {
+      const roomId = "{{ config.room_id }}";
+      const logEl = document.getElementById("discussion-log");
+      const memberListEl = document.getElementById("live-member-list");
+      const memberCountEl = document.getElementById("member-count");
+      const memberTagEl = document.getElementById("member-tag");
+      const speakerEl = document.getElementById("current-speaker");
+      const wsStatusEl = document.getElementById("ws-status");
+      const roomStatusTagEl = document.getElementById("room-status-tag");
+
+      function formatTime(ts) {
+        if (!ts) return "";
+        try {
+          return new Date(ts).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        } catch (_) {
+          return ts;
+        }
+      }
+
+      function appendEntry(html) {
+        if (logEl.querySelector(".empty-state")) {
+          logEl.innerHTML = "";
+        }
+        logEl.insertAdjacentHTML("beforeend", html);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function renderTimelineEntry(entry) {
+        const kind = entry.kind || entry.type;
+        if (kind === "message") {
+          const isHost = entry.from === "system";
+          const cls = isHost ? "discussion-entry system system-host" : "discussion-entry";
+          appendEntry(
+            `<article class="${cls}">` +
+              `<div class="discussion-meta"><span class="discussion-name">${entry.display_name || entry.from || "?"}</span>` +
+              `<span>${formatTime(entry.ts)}</span></div>` +
+              `<div class="discussion-text">${escapeHtml(entry.text || "")}</div>` +
+            `</article>`
+          );
+          return;
+        }
+        if (kind === "turn_granted") {
+          appendEntry(systemLine(`輪到 ${entry.display_name || entry.agent_id}（${entry.agent_id}）發言`, entry.ts));
+          return;
+        }
+        if (kind === "turn_pending") {
+          appendEntry(systemLine(
+            `下一位 ${entry.next_display_name || entry.next_agent_id}，${entry.gap_sec}s 後開麥`,
+            entry.ts
+          ));
+          return;
+        }
+        if (kind === "turn_revoked") {
+          const name = entry.display_name || entry.agent_id || "?";
+          appendEntry(systemLine(`${name} 發言逾時，輪次收回`, entry.ts));
+        }
+      }
+
+      function systemLine(text, ts) {
+        return `<article class="discussion-entry system"><div class="discussion-meta"><span>${formatTime(ts)}</span></div><div class="discussion-text">${escapeHtml(text)}</div></article>`;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      function renderMembers(members) {
+        memberCountEl.textContent = String(members.length);
+        memberTagEl.textContent = `${members.length} online`;
+        if (!members.length) {
+          memberListEl.innerHTML = '<li class="empty-state">目前沒有在線成員。</li>';
+          return;
+        }
+        memberListEl.innerHTML = members.map(function (m) {
+          return `<li class="member-row"><div class="member-name">${escapeHtml(m.display_name)}</div><div class="member-id">${escapeHtml(m.agent_id)}</div></li>`;
+        }).join("");
+      }
+
+      function setSpeaker(agentId) {
+        speakerEl.textContent = agentId || "—";
+      }
+
+      function setRoomStatus(discussionStarted, paused) {
+        if (!roomStatusTagEl) return;
+        if (!discussionStarted) {
+          roomStatusTagEl.textContent = "Waiting";
+        } else if (paused) {
+          roomStatusTagEl.textContent = "Paused";
+        } else {
+          roomStatusTagEl.textContent = "Active";
+        }
+      }
+
+      function handleEvent(event) {
+        const type = event.type;
+        if (type === "history") {
+          logEl.innerHTML = "";
+          (event.entries || []).forEach(renderTimelineEntry);
+          if (!event.entries || !event.entries.length) {
+            logEl.innerHTML = '<div class="empty-state">尚無討論紀錄。</div>';
+          }
+          return;
+        }
+        if (type === "members") {
+          renderMembers(event.members || []);
+          return;
+        }
+        if (type === "admin_status") {
+          setSpeaker(event.current_speaker);
+          setRoomStatus(event.discussion_started, event.paused);
+          return;
+        }
+        if (type === "discussion_started") {
+          setRoomStatus(true, false);
+          appendEntry(systemLine("老師已開始討論", event.ts));
+          return;
+        }
+        if (type === "room_config" || type === "room_config_updated") {
+          setRoomStatus(event.discussion_started, event.paused);
+        }
+        if (type === "message" || type === "turn_granted" || type === "turn_pending" || type === "turn_revoked") {
+          renderTimelineEntry(event);
+        }
+        if (type === "turn_granted") {
+          setSpeaker(event.agent_id);
+        }
+        if (type === "turn_revoked") {
+          setSpeaker(null);
+        }
+      }
+
+      let ws = null;
+      let reconnectTimer = null;
+
+      function connect() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        wsStatusEl.textContent = "連線中…";
+        wsStatusEl.classList.remove("live");
+        ws = new WebSocket(`${proto}://${location.host}/admin/ws/${roomId}`);
+        ws.onopen = function () {
+          wsStatusEl.textContent = "即時連線中";
+          wsStatusEl.classList.add("live");
+        };
+        ws.onmessage = function (ev) {
+          try {
+            handleEvent(JSON.parse(ev.data));
+          } catch (err) {
+            console.error("admin ws parse error", err);
+          }
+        };
+        ws.onclose = function () {
+          wsStatusEl.textContent = "已斷線，3 秒後重連…";
+          wsStatusEl.classList.remove("live");
+          reconnectTimer = setTimeout(connect, 3000);
+        };
+        ws.onerror = function () {
+          ws.close();
+        };
+      }
+
+      connect();
+      window.addEventListener("beforeunload", function () {
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        if (ws) ws.close();
+      });
+    })();
+  </script>
 </body>
 </html>
