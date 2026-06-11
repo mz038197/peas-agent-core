@@ -1,24 +1,20 @@
 [project]
 name = "peas-agent-core"
-version = "0.3.1"
+version = "0.3.2"
 description = "PEAS Agent Core — LangChain ReAct agent with workspace, memory, and skills"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "ddgs>=9.5.5",
+    "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "jinja2>=3.1.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=1.1.13",
+    "python-multipart>=0.0.9",
     "readability-lxml>=0.8.4",
-]
-
-[project.optional-dependencies]
-lobby = [
-    "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "websockets>=14.0",
-    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]
