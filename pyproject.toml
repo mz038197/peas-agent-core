@@ -1,6 +1,6 @@
 [project]
 name = "peas-agent-core"
-version = "0.3.3"
+version = "0.4.0"
 description = "PEAS Agent Core — LangChain ReAct agent with workspace, memory, and skills"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,7 +28,7 @@ build-backend = "hatchling.build"
 packages = ["src/peas_agent"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 asyncio_mode = "auto"
 
 [dependency-groups]
