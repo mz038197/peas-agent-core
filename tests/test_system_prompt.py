@@ -116,6 +116,29 @@ def test_load_bundled_template_reads_templates() -> None:
     assert "法鬥超人" in content
 
 
+def test_bundled_soul_includes_clarification_rules() -> None:
+    content = load_bundled_template("SOUL.md")
+    assert content is not None
+    assert "釐清與反思" in content
+    assert "需求或意圖" in content
+    assert "意圖已確認" in content
+
+
+def test_bundled_user_includes_communication_contract() -> None:
+    content = load_bundled_template("USER.md")
+    assert content is not None
+    assert "特殊指示" in content
+    assert "輕量反思" in content
+    assert "繁體中文" in content
+
+
+def test_bundled_agents_includes_clarification_section() -> None:
+    content = load_bundled_template("AGENTS.md")
+    assert content is not None
+    assert "釐清優先" in content
+    assert "雙根邊界" in content
+
+
 def test_identity_includes_workspace_and_project_root(
     workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

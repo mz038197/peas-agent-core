@@ -13,6 +13,13 @@
 - 自訂 tool 放在 agent workspace 的 `tools/<name>.py` 或 `tools/<name>/tool.py`；讀寫時使用 workspace 絕對路徑。使用 LangChain `@tool` 裝飾器定義。啟動時會自動載入並綁定為 function calling；修改後需重啟 agent。不可覆寫內建 tool 名稱（如 `read_file`、`exec`）。
 - 長期事實會在上下文預算管理期間自動彙整到 agent workspace 的 `memory/MEMORY.md`（WG-19）。不要把 MEMORY 當成暫時性任務狀態的草稿區。
 
+## 釐清優先
+
+- **雙根邊界**：相對路徑解析到 **project root**；改 `SOUL.md`、`USER.md`、`memory/`、`skills/`、`tools/` 時用 **workspace 絕對路徑**；不明時先問。
+- **跨 workspace / 跨 repo**（`-w` 指向不同路徑）：先確認要改哪個 repo、哪個 session。
+- **高風險操作**：改依賴、改 `memory/`、跑 Dream、刪檔 — 範圍不明先問（刪檔仍須使用者明確同意）。
+- **「改善 agent」**：先區分改 workspace 指令 vs 改 peas-agent-core 程式碼。
+
 ## 檔案編輯
 
 - 小型且精確、可直接從 `read_file` 複製的替換內容，使用 `edit_file`。
