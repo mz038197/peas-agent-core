@@ -50,8 +50,22 @@ def _run_chat(args: argparse.Namespace) -> None:
 
     print(
         f"（WG-17 token_budget={get_token_budget()}，"
-        f"WG-19 整併目標 ≤ {get_token_budget() // 2} 字元；以字元長度模擬 token。）"
+        f"WG-19 歸檔目標 ≤ {get_token_budget() // 2} 字元；以字元長度模擬 token。）"
     )
+
+    dream_cfg = agent.config.get("dream", {})
+    if isinstance(dream_cfg, dict) and dream_cfg.get("enabled", True):
+        from peas_agent.dream_scheduler import ensure_dream_scheduler
+
+        scheduler = ensure_dream_scheduler(agent.workspace, agent.config, llm=agent.llm)
+        if scheduler:
+            nxt = scheduler.next_run_at()
+            if nxt:
+                print(f"（Dream 背景排程已啟動；下次執行約 {nxt.strftime('%Y-%m-%d %H:%M')}。）")
+        print(
+            "（Dream 指令：/dream、/dream-log [sha]、/dream-restore [sha]、"
+            "/memory-summary、/memory-pin <關鍵字>）"
+        )
 
     pending_image: str | None = None
 
@@ -61,6 +75,30 @@ def _run_chat(args: argparse.Namespace) -> None:
             print("再見！")
             break
         if not user_line:
+            continue
+
+        if user_line == "/dream":
+            ok = agent.dream()
+            print("（Dream 完成。）" if ok else "（Dream：無待處理 history 或正在執行中。）")
+            continue
+        if user_line.startswith("/dream-log"):
+            parts = user_line.split(maxsplit=1)
+            sha = parts[1].strip() if len(parts) > 1 else None
+            print("\n" + agent.dream_log(sha))
+            continue
+        if user_line.startswith("/dream-restore"):
+            parts = user_line.split(maxsplit=1)
+            sha = parts[1].strip() if len(parts) > 1 else None
+            print("\n" + agent.dream_restore(sha))
+            continue
+        if user_line == "/memory-summary":
+            print("\n" + agent.memory_summary(refresh=True))
+            continue
+        if user_line.startswith("/memory-pin "):
+            keyword = user_line[len("/memory-pin ") :].strip()
+            if keyword:
+                agent.memory_pin(keyword)
+                print(f"（已釘選：{keyword!r}）")
             continue
 
         image_rel: str | None = None
