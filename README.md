@@ -33,6 +33,38 @@ uv sync
 
 也可透過環境變數 `PEAS_AGENT_WORKSPACE` 或 CLI `-w` 覆寫 workspace。
 
+`workspace` is the agent workspace. It stores durable agent files such as `SOUL.md`, `USER.md`, `AGENTS.md`, `memory/`, `sessions/`, `skills/`, and `tools/`.
+
+The runtime project root is not stored in `config.json`. PEAS Agent infers it from the directory where you launch the CLI by walking upward until it finds `.git`, `pyproject.toml`, or `uv.lock`. If no marker is found, it uses the current directory. Normal coding use does not require extra flags:
+
+```bash
+cd C:\path\to\my-project
+uv run peas-agent
+```
+
+Launching from an initialized project subdirectory still resolves to the parent project root:
+
+```bash
+cd C:\path\to\my-project\src\feature
+uv run peas-agent
+```
+
+Launching from an empty project root also works because no marker falls back to the current directory:
+
+```bash
+mkdir C:\path\to\empty-project
+cd C:\path\to\empty-project
+uv run peas-agent
+```
+
+Use `--project-root` / `--project` only when the host process must launch from one directory while asking the agent to work in another:
+
+```bash
+uv run peas-agent --project-root C:\path\to\my-project
+```
+
+Relative file paths, image paths, and shell commands default to the project root. Prefer project-relative paths for ordinary project files. Use absolute paths for files outside the project root, agent workspace files, or host/debug paths that must be unambiguous. Agent settings and memory remain under `workspace`.
+
 ## CLI
 
 ```bash
