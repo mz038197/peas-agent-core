@@ -18,6 +18,7 @@ def _run_chat(args: argparse.Namespace) -> None:
     try:
         agent = Agent.create(
             workspace=args.workspace,
+            project_root=args.project_root,
             session_name=args.session_name,
         )
     except (RuntimeError, ValueError) as e:
@@ -30,14 +31,15 @@ def _run_chat(args: argparse.Namespace) -> None:
 
     print("已讀到 API 金鑰設定（內容不顯示）；進入對話（串流 + 工具 + JSONL + 預算裁切 + WG-21 附圖）。")
     print(f"workspace: {agent.workspace}")
+    print(f"project_root: {agent.project_root}")
     print(f"config: {get_config_path()}")
     print(f"session: {agent.session_path}")
     print(f"model: {model}")
     if base_url:
         print(f"base_url: {base_url}")
     print(
-        "（WG-21 附圖：先輸入 `/image 相對路徑`，再輸入本輪文字；"
-        "或單行 `/image 路徑 問題`。）"
+        "（WG-21 附圖：先輸入 `/image 相對於 project root 的路徑`，再輸入本輪文字；"
+        "或單行 `/image 路徑 問題`。workspace 內附圖請用絕對路徑。）"
     )
 
     if agent.history:
@@ -108,7 +110,7 @@ def _run_chat(args: argparse.Namespace) -> None:
             rest = user_line[len("/image ") :].strip()
             if not rest:
                 print(
-                    "（用法：`/image 相對路徑`，下一行輸入文字；"
+                    "（用法：`/image 相對於 project root 的路徑`，下一行輸入文字；"
                     "或 `/image 路徑 問題`）"
                 )
                 continue
@@ -142,6 +144,12 @@ def main() -> None:
         "-w",
         "--workspace",
         help="Agent workspace 路徑（覆寫 config.json 與預設 ~/.peas-agent/workspace）",
+    )
+    parser.add_argument(
+        "--project-root",
+        "--project",
+        dest="project_root",
+        help="Advanced override for the runtime project root; normally inferred from cwd and parent project markers.",
     )
     parser.add_argument(
         "-s",

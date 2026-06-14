@@ -15,7 +15,9 @@ documents the general tool contract and non-obvious usage patterns.
 ## Discovery and Reading
 
 - Use `find_files` or `list_dir` to locate paths before `read_file` when a path is uncertain.
-- File tools accept absolute paths or paths relative to the workspace default directory.
+- File tools accept absolute paths or paths relative to the project root.
+- Prefer project-relative paths for ordinary project files. Use absolute paths for files outside the project root, agent workspace files, or host/debug paths that must be unambiguous.
+- Agent workspace files such as `SOUL.md`, `USER.md`, and `memory/MEMORY.md` are not resolved by bare relative path in v1. Use their absolute paths under the Agent workspace.
 - Use `grep` for content search; prefer it over shell grep for ordinary searches.
 - `grep` defaults to `output_mode="files_with_matches"`; use `output_mode="content"` for matching lines with context.
 - Use `fixed_strings=true` for literal keywords containing regex characters.
@@ -36,7 +38,7 @@ documents the general tool contract and non-obvious usage patterns.
 
 - Use `exec` for tests, builds, package commands, git commands, and other process execution.
 - Prefer dedicated file/search tools over `cat`, shell `find`, shell `grep`, `sed`, or `echo` for ordinary inspection and edits.
-- `exec` accepts an optional `cwd`; use it when a command must run outside the default workspace directory.
+- `exec` accepts an optional `cwd`; use it when a command must run outside the default project root directory.
 - Use non-interactive flags such as `-y` or `--yes` when available.
 - Commands have a configurable timeout (default 60s), dangerous commands are blocked, and output is truncated.
 - For long-running or interactive commands, pass `yield_time_ms`; if the process keeps running, continue with `write_stdin`.
