@@ -42,6 +42,8 @@ from peas_agent.prompt_templates import (
     render_template,
     sync_workspace_templates,
 )
+from peas_agent.memory_archive import archive_session_chunk
+from peas_agent.memory_store import MemoryStore, configure_memory_store, get_memory_store
 from peas_agent.tools_loader import (
     ToolsLoader,
     build_tools_summary,
@@ -94,6 +96,18 @@ def _default_config() -> dict[str, Any]:
                     "timeout": 30,
                 },
             },
+        },
+        "dream": {
+            "enabled": True,
+            "cron": "0 */2 * * *",
+            "model": None,
+            "max_batch_size": 20,
+            "max_iterations": 10,
+            "light_apply": True,
+            "cross_session_archive": True,
+            "cross_session_timing": "before_dream",
+            "recent_history_max": 50,
+            "summary_mode": "template",
         },
     }
 
@@ -214,7 +228,7 @@ def _set_memory_paths(workspace: Path) -> None:
     HISTORY_PATH = MEMORY_DIR / "HISTORY.md"
 
 
-def _configure_runtime(workspace: Path, config: dict[str, Any]) -> None:
+def _configure_runtime(workspace: Path, config: dict[str, Any]) -> MemoryStore:
     global WORKSPACE, SKILLS_LOADER, TOOLS_LOADER, _ACTIVE_CONFIG
     WORKSPACE = workspace
     _ACTIVE_CONFIG = config
@@ -225,6 +239,7 @@ def _configure_runtime(workspace: Path, config: dict[str, Any]) -> None:
         builtin_dir=PACKAGE_DIR / "builtin_skills",
     )
     TOOLS_LOADER = ToolsLoader(workspace)
+    return configure_memory_store(workspace)
 
 
 # ---------------------------------------------------------------------------
@@ -985,8 +1000,58 @@ def run_react_turn(
     return final_text, turn_messages
 
 
+def run_dream_react_turn(
+    llm_tools: ChatOpenAI,
+    system_text: str,
+    user_text: str,
+    *,
+    max_iterations: int = 10,
+    tool_runner: Callable[[str, dict[str, Any]], str] | None = None,
+) -> tuple[str, list[dict[str, str]]]:
+    """Dream Phase 2 ReAct with iteration cap; tool errors do not abort."""
+
+    def _invoke_tool(name: str, args: dict[str, Any]) -> str:
+        if tool_runner is not None:
+            return tool_runner(name, args)
+        return _run_bound_tool(name, args)
+
+    messages: list[BaseMessage] = [
+        SystemMessage(content=system_text),
+        HumanMessage(content=user_text),
+    ]
+    tool_events: list[dict[str, str]] = []
+    final_text = ""
+
+    for _ in range(max_iterations):
+        response = llm_tools.invoke(messages)
+        messages.append(response)
+
+        if not getattr(response, "tool_calls", None):
+            content = response.content
+            final_text = content.strip() if isinstance(content, str) else str(content).strip()
+            break
+
+        for tc in response.tool_calls:
+            name = str(tc["name"])
+            raw_args = dict(tc.get("args") or {})
+            result = _invoke_tool(name, raw_args)
+            status = "ok" if not str(result).startswith("Error") else "error"
+            tool_events.append({"name": name, "status": status, "detail": result[:200]})
+            messages.append(
+                ToolMessage(
+                    content=result,
+                    tool_call_id=str(tc["id"]),
+                    name=name,
+                )
+            )
+    else:
+        final_text = "[dream phase2: max iterations reached]"
+
+    return final_text, tool_events
+
+
 # ---------------------------------------------------------------------------
-# WG-19：長期記憶（memory/MEMORY.md、memory/HISTORY.md、整併 helpers）
+# WG-19：長期記憶（history.jsonl 歸檔 + Dream 合成 MEMORY/SOUL/USER）
 # ensure_budget_before_react 見 WG-20 之後（呼叫 build_system_prompt）
 # ---------------------------------------------------------------------------
 
@@ -1000,10 +1065,14 @@ LONG_TERM_MEMORY_HEADING = "## Long-term Memory"
 CONSOLIDATION_MAX_RETRIES = 3
 
 
-def read_memory_md() -> str:
-    if not MEMORY_PATH.is_file():
-        return ""
-    return MEMORY_PATH.read_text(encoding="utf-8").strip()
+def read_memory_md(store: MemoryStore | None = None) -> str:
+    try:
+        memory_store = store if store is not None else get_memory_store()
+        return memory_store.read_memory().strip()
+    except RuntimeError:
+        if not MEMORY_PATH.is_file():
+            return ""
+        return MEMORY_PATH.read_text(encoding="utf-8").strip()
 
 
 def load_memory_merge_prompt() -> str:
@@ -1019,20 +1088,25 @@ def is_default_memory_template(content: str) -> bool:
     return content.strip() == MEMORY_TEMPLATE_PATH.read_text(encoding="utf-8").strip()
 
 
-def memory_block_for_system() -> str:
+def memory_block_for_system(store: MemoryStore | None = None) -> str:
     """有 MEMORY.md 內文且非預設模板時，回傳 ## Long-term Memory 區塊（全文讀入，不截斷）。"""
-    body = read_memory_md()
+    body = read_memory_md(store)
     if not body or is_default_memory_template(body):
         return ""
     return f"{LONG_TERM_MEMORY_HEADING}\n\n{body}"
 
 
 def append_history_log(line: str) -> None:
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-    single = " ".join(line.split())
-    with open(HISTORY_PATH, "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {single}\n")
+    """Deprecated: use MemoryStore.append_history via archive flow."""
+    try:
+        store = get_memory_store()
+        store.append_history(" ".join(line.split()))
+    except RuntimeError:
+        MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        single = " ".join(line.split())
+        with open(HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {single}\n")
 
 
 def write_memory_md(content: str) -> None:
@@ -1123,31 +1197,19 @@ def _invoke_consolidation(
 def _consolidate_pack(
     consolidation_llm: ChatOpenAI,
     chunk: list[BaseMessage],
-    existing_memory: str,
+    session_key: str,
+    store: MemoryStore,
 ) -> None:
-    """Phase B：整包 chunk + 既有 MEMORY 一次 consolidation；寫 MEMORY／HISTORY。"""
+    """Archive chunk summary to history.jsonl (Dream updates MEMORY later)."""
     if not chunk:
         return
-
-    chunk_text = _chunk_to_text(chunk)
-    max_retries = CONSOLIDATION_MAX_RETRIES
-
-    if max_retries <= 0:
-        fail_note = " ".join(chunk_text.split())[:200]
-        append_history_log(f"[CONSOLIDATION-FAILED] {fail_note}")
-        return
-
-    for _ in range(max_retries):
-        parsed = _invoke_consolidation(consolidation_llm, chunk_text, existing_memory)
-        if parsed is None:
-            continue
-        entry = " ".join(parsed["history_entry"].split())
-        write_memory_md(parsed["memory_update"].strip())
-        append_history_log(entry)
-        return
-
-    fail_note = " ".join(chunk_text.split())[:200]
-    append_history_log(f"[CONSOLIDATION-FAILED] {fail_note}")
+    archive_session_chunk(
+        consolidation_llm,
+        store,
+        chunk,
+        session_key,
+        message_plaintext=_message_plaintext,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1276,7 +1338,7 @@ def _tools_loader() -> ToolsLoader:
     return TOOLS_LOADER
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(store: MemoryStore | None = None) -> str:
     """WG-12～20 送模 system 唯一入口（identity + bootstrap + tool_contract + memory + Skills）。"""
     parts: list[str] = [_get_identity(WORKSPACE)]
 
@@ -1289,9 +1351,32 @@ def build_system_prompt() -> str:
 
     parts.append(render_template("agent/tool_contract.md"))
 
-    mem = memory_block_for_system()
+    mem = memory_block_for_system(store)
     if mem:
         parts.append(mem)
+
+    memory_store = store
+    if memory_store is None:
+        try:
+            memory_store = get_memory_store(WORKSPACE)
+        except RuntimeError:
+            memory_store = None
+    if memory_store is not None:
+        dream_cfg = _ACTIVE_CONFIG.get("dream", {})
+        if not isinstance(dream_cfg, dict):
+            dream_cfg = {}
+        max_recent = int(dream_cfg.get("recent_history_max", 50))
+        if max_recent > 0:
+            entries = memory_store.read_unprocessed_history(
+                since_cursor=memory_store.get_last_dream_cursor()
+            )
+            if entries:
+                capped = entries[-max_recent:]
+                lines = [
+                    f"- [{e.get('timestamp', '?')}] {e.get('content', '')}"
+                    for e in capped
+                ]
+                parts.append("# Recent History\n\n" + "\n".join(lines))
 
     entries = _skills_loader().list_skills()
     active = [e for e in entries if e.always]
@@ -1332,6 +1417,9 @@ def ensure_budget_before_react(
     history: list[BaseMessage],
     last_consolidated: int,
     human_message: HumanMessage,
+    store: MemoryStore,
+    *,
+    session_key: str = "session.jsonl",
 ) -> int:
     """WG-19：ReAct 前外層迴圈 — Phase A 規劃 final_idx，Phase B 整包整併 + 推游標。
 
@@ -1341,7 +1429,7 @@ def ensure_budget_before_react(
 
     while True:
         # Phase A — 規劃（不呼叫 consolidation LLM）
-        system_text = build_system_prompt()
+        system_text = build_system_prompt(store)
         past0 = history[last_consolidated:]
         cost = len(system_text) + message_cost([*past0, human_message])
         if cost <= target:
@@ -1373,13 +1461,11 @@ def ensure_budget_before_react(
             f"待整併 {len(pack)} 則；cost={cost}，target={target}。）"
         )
 
-        # Phase B — 整包整併 + 推游標（一次 invoke）
-        existing = read_memory_md()
         print(
-            f"（WG-19 整併：history[{last_consolidated}:{final_idx}]"
-            f" + MEMORY → memory/MEMORY.md。）"
+            f"（WG-19 歸檔：history[{last_consolidated}:{final_idx}]"
+            f" → memory/history.jsonl。）"
         )
-        _consolidate_pack(consolidation_llm, pack, existing)
+        _consolidate_pack(consolidation_llm, pack, session_key, store)
         last_consolidated = final_idx
         # 回到 Phase A 重算（MEMORY 更新後 system 可能變長）
 
@@ -1403,6 +1489,7 @@ class Agent:
         last_consolidated: int,
         llm: ChatOpenAI,
         llm_tools: Any,
+        store: MemoryStore,
     ) -> None:
         self.workspace = workspace
         self.config = config
@@ -1412,6 +1499,7 @@ class Agent:
         self.last_consolidated = last_consolidated
         self.llm = llm
         self.llm_tools = llm_tools
+        self.store = store
 
     @classmethod
     def create(
@@ -1426,7 +1514,7 @@ class Agent:
             _resolve_workspace(workspace, config)
         )
         set_host_context(host_context)
-        _configure_runtime(resolved_workspace, config)
+        store = _configure_runtime(resolved_workspace, config)
 
         session_file = _resolve_session_path(resolved_workspace, session_name)
         session_str = str(session_file)
@@ -1439,7 +1527,7 @@ class Agent:
         llm = _build_llm(config)
         all_tools = _load_all_tools()
         llm_tools = llm.bind_tools(all_tools)
-        return cls(
+        agent = cls(
             workspace=resolved_workspace,
             config=config,
             session_path=session_str,
@@ -1448,7 +1536,12 @@ class Agent:
             last_consolidated=last_consolidated,
             llm=llm,
             llm_tools=llm_tools,
+            store=store,
         )
+        from peas_agent.dream_scheduler import ensure_dream_scheduler
+
+        ensure_dream_scheduler(resolved_workspace, config, llm=llm)
+        return agent
 
     def chat(
         self,
@@ -1468,9 +1561,17 @@ class Agent:
         history_human = history_human_placeholder(user_text, image_rel, media_type)
         human_for_send = build_human_message_for_current_turn(user_text, image_rel)
 
+        session_key = Path(self.session_path).name
+        self._maybe_cross_session_each_chat()
+
         prev_consolidated = self.last_consolidated
         self.last_consolidated = ensure_budget_before_react(
-            self.llm, self.history, self.last_consolidated, history_human
+            self.llm,
+            self.history,
+            self.last_consolidated,
+            history_human,
+            self.store,
+            session_key=session_key,
         )
         if self.last_consolidated != prev_consolidated:
             if self.session_meta is None:
@@ -1482,7 +1583,7 @@ class Agent:
                 self.last_consolidated,
             )
 
-        system_text = build_system_prompt()
+        system_text = build_system_prompt(self.store)
         past = self.history[self.last_consolidated:]
 
         final_text, turn_messages = run_react_turn(
@@ -1509,6 +1610,67 @@ class Agent:
             f" last_consolidated={self.last_consolidated}。）"
         )
         return final_text
+
+    def _maybe_cross_session_each_chat(self) -> None:
+        dream_cfg = self.config.get("dream", {})
+        if not isinstance(dream_cfg, dict):
+            return
+        if not dream_cfg.get("cross_session_archive", True):
+            return
+        if dream_cfg.get("cross_session_timing") != "each_chat":
+            return
+        from peas_agent.dream import Dream
+
+        Dream(self.workspace, self.config, self.llm, store=self.store)._cross_session(
+            self.session_path
+        )
+
+    def dream(self) -> bool:
+        from peas_agent.dream import Dream
+
+        return Dream(
+            self.workspace, self.config, self.llm, store=self.store
+        ).run(active_session_path=self.session_path)
+
+    def dream_log(self, sha: str | None = None) -> str:
+        store = self.store
+        if not sha:
+            commits = store.git.log(max_entries=5)
+            if not commits:
+                return "（尚無 Dream git 紀錄）"
+            return "\n\n".join(c.format() for c in commits)
+        result = store.git.show_commit_diff(sha)
+        if result is None:
+            return f"找不到 commit {sha!r}"
+        commit, diff = result
+        return commit.format(diff)
+
+    def dream_restore(self, sha: str | None = None) -> str:
+        store = self.store
+        if sha is None:
+            commits = store.git.log(max_entries=10)
+            if not commits:
+                return "（尚無可還原的 commit）"
+            lines = [f"- `{c.sha}` {c.timestamp} {c.message.splitlines()[0]}" for c in commits]
+            return "最近 Dream commits：\n" + "\n".join(lines)
+        new_sha = store.git.revert(sha)
+        if new_sha:
+            from peas_agent.memory_summary import regenerate_memory_summary
+
+            regenerate_memory_summary(store)
+            return f"已還原至 {sha} 的父 commit，新 commit `{new_sha}`"
+        return f"還原失敗：{sha!r}"
+
+    def memory_summary(self, *, refresh: bool = False) -> str:
+        from peas_agent.memory_summary import regenerate_memory_summary
+
+        store = self.store
+        if refresh or not store.summary_file.is_file():
+            return regenerate_memory_summary(store)
+        return store.summary_file.read_text(encoding="utf-8")
+
+    def memory_pin(self, keyword: str) -> None:
+        self.store.add_pin(keyword)
 
 
 get_config_path = _get_config_path

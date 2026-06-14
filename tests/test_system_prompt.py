@@ -10,10 +10,10 @@ from peas_agent.core import (
     BOOTSTRAP_FILES,
     PACKAGE_DIR,
     SkillsLoader,
-    WORKSPACE,
     build_system_prompt,
     set_host_context,
 )
+from peas_agent.memory_store import configure_memory_store
 from peas_agent.tools_loader import ToolsLoader
 from peas_agent.prompt_templates import load_bundled_template, sync_workspace_templates
 
@@ -31,7 +31,8 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         SkillsLoader(root, builtin_dir=PACKAGE_DIR / "builtin_skills"),
     )
     monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(root))
-    monkeypatch.setattr("peas_agent.core._ACTIVE_CONFIG", {"token_budget": 100000})
+    monkeypatch.setattr("peas_agent.core._ACTIVE_CONFIG", {"token_budget": 100000, "dream": {"recent_history_max": 0}})
+    configure_memory_store(root)
     return root
 
 
