@@ -150,6 +150,28 @@ def _resolve_workspace(
     return DEFAULT_WORKSPACE.expanduser().resolve()
 
 
+PROJECT_ROOT_MARKERS = (".git", "pyproject.toml", "uv.lock")
+
+
+def _discover_project_root(start: Path) -> Path:
+    current = start.expanduser().resolve()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        if any((candidate / marker).exists() for marker in PROJECT_ROOT_MARKERS):
+            return candidate
+    return current
+
+
+def _resolve_project_root(project_root: str | Path | None) -> Path:
+    if project_root is not None:
+        return Path(project_root).expanduser().resolve()
+    env_project = os.environ.get("PEAS_AGENT_PROJECT_ROOT")
+    if env_project:
+        return Path(env_project).expanduser().resolve()
+    return _discover_project_root(Path.cwd())
+
+
 def init_workspace(workspace: Path) -> Path:
     root = workspace.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -228,9 +250,15 @@ def _set_memory_paths(workspace: Path) -> None:
     HISTORY_PATH = MEMORY_DIR / "HISTORY.md"
 
 
-def _configure_runtime(workspace: Path, config: dict[str, Any]) -> MemoryStore:
-    global WORKSPACE, SKILLS_LOADER, TOOLS_LOADER, _ACTIVE_CONFIG
+def _configure_runtime(
+    workspace: Path,
+    config: dict[str, Any],
+    project_root: Path | None = None,
+) -> MemoryStore:
+    global WORKSPACE, PROJECT_ROOT, SKILLS_LOADER, TOOLS_LOADER, _ACTIVE_CONFIG
     WORKSPACE = workspace
+    if project_root is not None:
+        PROJECT_ROOT = project_root.expanduser().resolve()
     _ACTIVE_CONFIG = config
     configure_web(config)
     _set_memory_paths(workspace)
@@ -263,7 +291,7 @@ def _detect_shell_name() -> str:
     return shell_name or "POSIX shell"
 
 
-def _get_identity(workspace: Path) -> str:
+def _get_identity(workspace: Path, project_root: Path) -> str:
     """Render identity + platform policy from bundled templates."""
     root = workspace.expanduser().resolve()
     system = platform.system()
@@ -279,6 +307,7 @@ def _get_identity(workspace: Path) -> str:
     return render_template(
         "agent/identity.md",
         workspace_path=str(root),
+        project_root=str(project_root.expanduser().resolve()),
         runtime=runtime,
         platform_policy=platform_policy,
     )
@@ -294,6 +323,15 @@ def _load_bootstrap_files(workspace: Path) -> str:
             content = file_path.read_text(encoding="utf-8")
             parts.append(f"## {filename}\n\n{content}")
     return "\n\n".join(parts) if parts else ""
+
+
+def _load_project_instructions(project_root: Path) -> str:
+    root = project_root.expanduser().resolve()
+    file_path = root / "AGENTS.md"
+    if not file_path.is_file():
+        return ""
+    content = file_path.read_text(encoding="utf-8")
+    return f"## Project AGENTS.md\n\n{content}"
 
 
 @tool
@@ -327,19 +365,30 @@ def _stream_model_response(
 # ---------------------------------------------------------------------------
 
 WORKSPACE = DEFAULT_WORKSPACE.expanduser().resolve()
+PROJECT_ROOT = Path.cwd().resolve()
 
 
-def resolve_workspace_path(path: str) -> Path:
-    """Resolve a filesystem path. Absolute paths are used as-is; relative paths are under WORKSPACE."""
+def resolve_project_path(path: str) -> Path:
+    """Resolve a filesystem path. Absolute paths are used as-is; relative paths are under PROJECT_ROOT."""
     raw = Path(path)
     if raw.is_absolute():
         return raw.expanduser().resolve()
-    return (WORKSPACE / path).expanduser().resolve()
+    return (PROJECT_ROOT / path).expanduser().resolve()
+
+
+def resolve_workspace_path(path: str) -> Path:
+    """Deprecated alias for project-relative tool paths.
+
+    Kept for backward compatibility only. Despite the historical name, this
+    resolves relative paths against PROJECT_ROOT, not the agent workspace.
+    New code should call resolve_project_path().
+    """
+    return resolve_project_path(path)
 
 
 def _resolve_readable_path(path: str) -> Path:
     """Resolve a readable file path, with package builtin_skills/ as a relative-path fallback."""
-    target = resolve_workspace_path(path)
+    target = resolve_project_path(path)
     if target.is_file():
         return target
 
@@ -352,7 +401,7 @@ def _resolve_readable_path(path: str) -> Path:
 
 @tool("read_file")
 def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
-    """讀取 UTF-8 文字檔，回傳帶行號內容。接受絕對路徑或相對於 workspace 的路徑。"""
+    """讀取 UTF-8 文字檔，回傳帶行號內容。接受絕對路徑或相對於 project root 的路徑。"""
     try:
         target = _resolve_readable_path(path)
         if not target.is_file():
@@ -367,9 +416,9 @@ def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
 
 @tool("write_file")
 def write_file(path: str, content: str) -> str:
-    """整檔覆寫寫入 UTF-8 文字檔（必要時建立父資料夾）。接受絕對路徑或相對於 workspace 的路徑。"""
+    """整檔覆寫寫入 UTF-8 文字檔（必要時建立父資料夾）。接受絕對路徑或相對於 project root 的路徑。"""
     try:
-        target = resolve_workspace_path(path)
+        target = resolve_project_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return f"wrote {len(content)} characters to {path}"
@@ -379,9 +428,9 @@ def write_file(path: str, content: str) -> str:
 
 @tool("edit_file")
 def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-    """在既有檔案中把 old_text 換成 new_text（預設僅單次替換）。接受絕對路徑或相對於 workspace 的路徑。"""
+    """在既有檔案中把 old_text 換成 new_text（預設僅單次替換）。接受絕對路徑或相對於 project root 的路徑。"""
     try:
-        target = resolve_workspace_path(path)
+        target = resolve_project_path(path)
         text = target.read_text(encoding="utf-8")
         count = text.count(old_text)
         if count == 0:
@@ -399,9 +448,9 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
 
 @tool("list_dir")
 def list_dir(path: str, recursive: bool = False, max_entries: int = 200) -> str:
-    """列出資料夾內容。接受絕對路徑或相對於 workspace 的路徑。"""
+    """列出資料夾內容。接受絕對路徑或相對於 project root 的路徑。"""
     try:
-        root = resolve_workspace_path(path)
+        root = resolve_project_path(path)
         if not root.is_dir():
             return f"Error: not a directory: {path}"
         iterator = root.rglob("*") if recursive else root.iterdir()
@@ -413,7 +462,7 @@ def list_dir(path: str, recursive: bool = False, max_entries: int = 200) -> str:
 
 @tool("exec")
 def exec_workspace(command: str, timeout: int = 30, cwd: str | None = None) -> str:
-    """執行 shell 指令（已阻擋常見危險片段）。可選 cwd 指定工作目錄；預設為 workspace。"""
+    """執行 shell 指令（已阻擋常見危險片段）。可選 cwd 指定工作目錄；預設為 project root。"""
     blocked = ("rm -rf", "del /f", "rmdir /s", "format", "shutdown")
     lowered = command.lower()
     if any(part in lowered for part in blocked):
@@ -425,9 +474,9 @@ def exec_workspace(command: str, timeout: int = 30, cwd: str | None = None) -> s
             "uv run python <script.py>."
         )
 
-    work_dir = resolve_workspace_path(cwd) if cwd else WORKSPACE
+    work_dir = resolve_project_path(cwd) if cwd else PROJECT_ROOT
     if not work_dir.is_dir():
-        return f"Error: not a directory: {cwd or WORKSPACE}"
+        return f"Error: not a directory: {cwd or PROJECT_ROOT}"
 
     child_env = os.environ.copy()
     child_env.setdefault("PYTHONUTF8", "1")
@@ -689,11 +738,11 @@ def image_bytes_to_data_url(data: bytes, media_type: str) -> str:
 
 
 def resolve_project_image_path(rel: str) -> Path:
-    """WG-21：解析附圖路徑。絕對路徑直接使用；相對路徑以 workspace（或 cwd）為基準。"""
+    """WG-21：解析附圖路徑。絕對路徑直接使用；相對路徑以 project root 為基準。"""
     raw = Path(rel)
     if raw.is_absolute():
         return raw.expanduser().resolve()
-    base = WORKSPACE if WORKSPACE is not None else Path.cwd()
+    base = PROJECT_ROOT if PROJECT_ROOT is not None else Path.cwd()
     return (base / rel).expanduser().resolve()
 
 
@@ -1340,7 +1389,7 @@ def _tools_loader() -> ToolsLoader:
 
 def build_system_prompt(store: MemoryStore | None = None) -> str:
     """WG-12～20 送模 system 唯一入口（identity + bootstrap + tool_contract + memory + Skills）。"""
-    parts: list[str] = [_get_identity(WORKSPACE)]
+    parts: list[str] = [_get_identity(WORKSPACE, PROJECT_ROOT)]
 
     bootstrap = _load_bootstrap_files(WORKSPACE)
     if bootstrap:
@@ -1348,6 +1397,10 @@ def build_system_prompt(store: MemoryStore | None = None) -> str:
 
     if _RUNTIME_HOST_CONTEXT:
         parts.append(f"# Host Environment\n\n{_RUNTIME_HOST_CONTEXT}")
+
+    project_instructions = _load_project_instructions(PROJECT_ROOT)
+    if project_instructions:
+        parts.append(project_instructions)
 
     parts.append(render_template("agent/tool_contract.md"))
 
@@ -1482,6 +1535,7 @@ class Agent:
         self,
         *,
         workspace: Path,
+        project_root: Path,
         config: dict[str, Any],
         session_path: str,
         history: list[BaseMessage],
@@ -1492,6 +1546,7 @@ class Agent:
         store: MemoryStore,
     ) -> None:
         self.workspace = workspace
+        self.project_root = project_root
         self.config = config
         self.session_path = session_path
         self.history = history
@@ -1506,6 +1561,7 @@ class Agent:
         cls,
         *,
         workspace: str | Path | None = None,
+        project_root: str | Path | None = None,
         session_name: str | None = None,
         host_context: str | None = None,
     ) -> Agent:
@@ -1513,8 +1569,9 @@ class Agent:
         resolved_workspace = init_workspace(
             _resolve_workspace(workspace, config)
         )
+        resolved_project_root = _resolve_project_root(project_root)
         set_host_context(host_context)
-        store = _configure_runtime(resolved_workspace, config)
+        store = _configure_runtime(resolved_workspace, config, resolved_project_root)
 
         session_file = _resolve_session_path(resolved_workspace, session_name)
         session_str = str(session_file)
@@ -1529,6 +1586,7 @@ class Agent:
         llm_tools = llm.bind_tools(all_tools)
         agent = cls(
             workspace=resolved_workspace,
+            project_root=resolved_project_root,
             config=config,
             session_path=session_str,
             history=history,
