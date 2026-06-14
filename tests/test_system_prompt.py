@@ -23,6 +23,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path.resolve()
     monkeypatch.chdir(root)
     monkeypatch.setattr("peas_agent.core.WORKSPACE", root)
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", root)
     monkeypatch.setattr("peas_agent.core.MEMORY_DIR", root / "memory")
     monkeypatch.setattr("peas_agent.core.MEMORY_PATH", root / "memory" / "MEMORY.md")
     monkeypatch.setattr("peas_agent.core.HISTORY_PATH", root / "memory" / "HISTORY.md")
@@ -68,7 +69,7 @@ def test_tool_contract_always_injected(workspace: Path) -> None:
 def test_build_system_prompt_order(workspace: Path) -> None:
     sync_workspace_templates(workspace, silent=True)
     prompt = build_system_prompt()
-    identity_idx = prompt.find("## Workspace")
+    identity_idx = prompt.find("## Roots")
     bootstrap_idx = prompt.find("## AGENTS.md")
     tool_idx = prompt.find("# Tool Usage Notes")
     memory_idx = prompt.find("## Long-term Memory")
@@ -113,3 +114,32 @@ def test_load_bundled_template_reads_templates() -> None:
     content = load_bundled_template("SOUL.md")
     assert content is not None
     assert "法鬥超人" in content
+
+
+def test_identity_includes_workspace_and_project_root(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr("peas_agent.core.WORKSPACE", workspace.resolve())
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project.resolve())
+    prompt = build_system_prompt()
+
+    assert f"Agent workspace: {workspace.resolve()}" in prompt
+    assert f"Project root: {project.resolve()}" in prompt
+    assert "Relative file paths resolve against the project root." in prompt
+
+
+def test_project_agents_md_is_injected_separately(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "AGENTS.md").write_text("project-specific rule", encoding="utf-8")
+    monkeypatch.setattr("peas_agent.core.WORKSPACE", workspace.resolve())
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project.resolve())
+
+    prompt = build_system_prompt()
+
+    assert "## Project AGENTS.md" in prompt
+    assert "project-specific rule" in prompt

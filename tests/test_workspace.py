@@ -10,11 +10,13 @@ import pytest
 
 from peas_agent.core import (
     PACKAGE_DIR,
+    Agent,
     SkillsLoader,
     _build_llm,
     _default_config,
     _ensure_config,
     _new_session_path,
+    _resolve_project_root,
     _resolve_session_path,
     _resolve_workspace,
     _validate_session_name,
@@ -150,3 +152,95 @@ def test_skills_loader_reads_package_builtin(peas_home: Path) -> None:
     entries = loader.list_skills()
     names = {e.name for e in entries}
     assert "always-on" in names or "demo" in names
+
+
+def test_resolve_project_root_explicit_path(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    assert _resolve_project_root(project) == project.resolve()
+
+
+def test_resolve_project_root_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "from-env"
+    project.mkdir()
+    monkeypatch.setenv("PEAS_AGENT_PROJECT_ROOT", str(project))
+    assert _resolve_project_root(None) == project.resolve()
+
+
+def test_resolve_project_root_defaults_to_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_project_root(None) == tmp_path.resolve()
+
+
+def test_resolve_project_root_discovers_parent_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "project"
+    nested = project / "src" / "feature"
+    nested.mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+
+    assert _resolve_project_root(None) == project.resolve()
+
+
+def test_agent_create_infers_project_root_from_cwd(
+    peas_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = init_workspace(peas_home / "workspace")
+    project = tmp_path / "project"
+    nested = project / "src" / "feature"
+    nested.mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\nname = 'demo'\n", encoding="utf-8")
+    monkeypatch.chdir(nested)
+    cfg = _default_config()
+    cfg["workspace"] = str(ws)
+    cfg["llm"]["api_key"] = "test-key"
+    monkeypatch.setattr("peas_agent.core._ensure_config", lambda: cfg)
+    monkeypatch.setattr("peas_agent.core._load_all_tools", lambda: [])
+    monkeypatch.setattr("peas_agent.core.ensure_budget_before_react", lambda *a, **k: 0)
+    monkeypatch.setattr("peas_agent.dream_scheduler.ensure_dream_scheduler", lambda *a, **k: None)
+
+    class BoundLLM:
+        def bind_tools(self, tools):
+            return self
+
+    monkeypatch.setattr("peas_agent.core._build_llm", lambda config: BoundLLM())
+
+    agent = Agent.create(workspace=ws)
+
+    assert agent.workspace == ws.resolve()
+    assert agent.project_root == project.resolve()
+
+
+def test_agent_create_accepts_project_root_override(
+    peas_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = init_workspace(peas_home / "workspace")
+    cwd_project = tmp_path / "cwd-project"
+    override_project = tmp_path / "override-project"
+    cwd_project.mkdir()
+    override_project.mkdir()
+    monkeypatch.chdir(cwd_project)
+    cfg = _default_config()
+    cfg["workspace"] = str(ws)
+    cfg["llm"]["api_key"] = "test-key"
+    monkeypatch.setattr("peas_agent.core._ensure_config", lambda: cfg)
+    monkeypatch.setattr("peas_agent.core._load_all_tools", lambda: [])
+    monkeypatch.setattr("peas_agent.core.ensure_budget_before_react", lambda *a, **k: 0)
+    monkeypatch.setattr("peas_agent.dream_scheduler.ensure_dream_scheduler", lambda *a, **k: None)
+
+    class BoundLLM:
+        def bind_tools(self, tools):
+            return self
+
+    monkeypatch.setattr("peas_agent.core._build_llm", lambda config: BoundLLM())
+
+    agent = Agent.create(workspace=ws, project_root=override_project)
+
+    assert agent.workspace == ws.resolve()
+    assert agent.project_root == override_project.resolve()
