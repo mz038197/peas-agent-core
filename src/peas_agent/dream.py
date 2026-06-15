@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -19,10 +18,6 @@ from peas_agent.memory_summary import regenerate_memory_summary
 PACKAGE_DIR = Path(__file__).resolve().parent
 DREAM_PHASE1_PATH = PACKAGE_DIR / "prompts" / "dream_phase1.md"
 DREAM_PHASE2_PATH = PACKAGE_DIR / "prompts" / "dream_phase2.md"
-
-_FILE_RE = re.compile(r"^\[FILE\]\s+(USER|SOUL|MEMORY):\s*(.+)$", re.IGNORECASE)
-_REMOVE_RE = re.compile(r"^\[FILE-REMOVE\]", re.IGNORECASE)
-_SKILL_RE = re.compile(r"^\[SKILL\]", re.IGNORECASE)
 
 _workspace_locks: dict[str, threading.Lock] = {}
 _lock_registry = threading.Lock()
@@ -43,7 +38,6 @@ def get_dream_config(config: dict[str, Any]) -> dict[str, Any]:
         "model": None,
         "max_batch_size": 20,
         "max_iterations": 10,
-        "light_apply": True,
         "cross_session_archive": True,
         "cross_session_timing": "before_dream",
         "recent_history_max": 50,
@@ -136,12 +130,8 @@ class Dream:
             self._finalize(batch, had_changes=False)
             return True
 
-        had_changes = False
-        if self.dream_cfg.get("light_apply", True) and self._try_light_apply(analysis):
-            had_changes = True
-        else:
-            print("（Dream Phase 2：更新記憶檔…）", flush=True)
-            had_changes = self._run_phase2(analysis, file_context)
+        print("（Dream Phase 2：更新記憶檔…）", flush=True)
+        had_changes = self._run_phase2(analysis, file_context)
 
         self._finalize(batch, had_changes=had_changes)
         return True
@@ -181,46 +171,6 @@ class Dream:
             return True
         non_skip = [line for line in lines if line.upper() != "[SKIP]"]
         return not non_skip
-
-    def _try_light_apply(self, analysis: str) -> bool:
-        lines = [line.strip() for line in analysis.splitlines() if line.strip()]
-        file_lines = [line for line in lines if line.upper().startswith("[FILE]")]
-        if not file_lines or len(file_lines) > 2:
-            return False
-        if any(_REMOVE_RE.match(line) or _SKILL_RE.match(line) for line in lines):
-            return False
-
-        changed = False
-        for line in file_lines:
-            match = _FILE_RE.match(line)
-            if not match:
-                return False
-            target, text = match.group(1).upper(), match.group(2).strip()
-            if self._append_bullet(target, text):
-                changed = True
-        return changed
-
-    def _append_bullet(self, target: str, text: str) -> bool:
-        bullet = f"- {text}\n"
-        if target == "USER":
-            existing = self.store.read_user()
-            if text in existing:
-                return False
-            self.store.write_user(existing.rstrip() + "\n" + bullet)
-            return True
-        if target == "SOUL":
-            existing = self.store.read_soul()
-            if text in existing:
-                return False
-            self.store.write_soul(existing.rstrip() + "\n" + bullet)
-            return True
-        if target == "MEMORY":
-            existing = self.store.read_memory()
-            if text in existing:
-                return False
-            self.store.write_memory(existing.rstrip() + "\n" + bullet)
-            return True
-        return False
 
     def _run_phase2(self, analysis: str, file_context: str) -> bool:
         from peas_agent.core import SkillsLoader, run_dream_react_turn

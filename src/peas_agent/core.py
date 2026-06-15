@@ -104,7 +104,6 @@ def _default_config() -> dict[str, Any]:
             "model": None,
             "max_batch_size": 20,
             "max_iterations": 10,
-            "light_apply": True,
             "cross_session_archive": True,
             "cross_session_timing": "before_dream",
             "recent_history_max": 50,

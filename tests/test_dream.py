@@ -1,4 +1,4 @@
-"""Tests for Dream.run noop and light_apply."""
+"""Tests for Dream.run noop and phase2 routing."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ def dream_env(tmp_path: Path) -> tuple[Path, MagicMock]:
     config = {
         "dream": {
             "enabled": True,
-            "light_apply": True,
             "cross_session_archive": False,
             "max_batch_size": 20,
         }
@@ -45,14 +44,14 @@ def test_dream_skip_advances_cursor(dream_env: tuple[Path, MagicMock]) -> None:
 
     dream = Dream(
         workspace,
-        {"dream": {"cross_session_archive": False, "light_apply": True}},
+        {"dream": {"cross_session_archive": False}},
         llm,
     )
     assert dream.run() is True
     assert store.get_last_dream_cursor() == 1
 
 
-def test_dream_light_apply(dream_env: tuple[Path, MagicMock]) -> None:
+def test_dream_runs_phase2_for_file_updates(dream_env: tuple[Path, MagicMock]) -> None:
     workspace, llm = dream_env
     store = get_memory_store()
     store.append_history("discussion")
@@ -62,9 +61,10 @@ def test_dream_light_apply(dream_env: tuple[Path, MagicMock]) -> None:
 
     dream = Dream(
         workspace,
-        {"dream": {"cross_session_archive": False, "light_apply": True}},
+        {"dream": {"cross_session_archive": False}},
         llm,
     )
-    assert dream.run() is True
-    assert "繁中" in store.read_user()
+    with patch.object(Dream, "_run_phase2", return_value=True) as mock_phase2:
+        assert dream.run() is True
+        mock_phase2.assert_called_once()
     assert store.get_last_dream_cursor() == 1
