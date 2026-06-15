@@ -75,10 +75,6 @@ class Dream:
                 self.store = get_memory_store(self.workspace)
             except RuntimeError:
                 self.store = configure_memory_store(self.workspace)
-        self._dream_llm = self._build_dream_llm()
-
-    def _build_dream_llm(self) -> ChatOpenAI:
-        return self.llm
 
     def run(self, *, active_session_path: str | None = None) -> bool:
         lock = get_workspace_lock(self.workspace)
@@ -120,7 +116,8 @@ class Dream:
         )
 
         try:
-            phase1_response = self._dream_llm.invoke(
+            print("（Dream Phase 1：分析 history…）", flush=True)
+            phase1_response = self.llm.invoke(
                 [
                     SystemMessage(content=DREAM_PHASE1_PATH.read_text(encoding="utf-8")),
                     HumanMessage(content=phase1_user),
@@ -143,6 +140,7 @@ class Dream:
         if self.dream_cfg.get("light_apply", True) and self._try_light_apply(analysis):
             had_changes = True
         else:
+            print("（Dream Phase 2：更新記憶檔…）", flush=True)
             had_changes = self._run_phase2(analysis, file_context)
 
         self._finalize(batch, had_changes=had_changes)
@@ -205,19 +203,24 @@ class Dream:
     def _append_bullet(self, target: str, text: str) -> bool:
         bullet = f"- {text}\n"
         if target == "USER":
-            path = self.store.user_file
-        elif target == "SOUL":
-            path = self.store.soul_file
-        elif target == "MEMORY":
-            path = self.store.memory_file
-        else:
-            return False
-
-        existing = self.store.read_file(path)
-        if text in existing:
-            return False
-        path.write_text(existing.rstrip() + "\n" + bullet, encoding="utf-8")
-        return True
+            existing = self.store.read_user()
+            if text in existing:
+                return False
+            self.store.write_user(existing.rstrip() + "\n" + bullet)
+            return True
+        if target == "SOUL":
+            existing = self.store.read_soul()
+            if text in existing:
+                return False
+            self.store.write_soul(existing.rstrip() + "\n" + bullet)
+            return True
+        if target == "MEMORY":
+            existing = self.store.read_memory()
+            if text in existing:
+                return False
+            self.store.write_memory(existing.rstrip() + "\n" + bullet)
+            return True
+        return False
 
     def _run_phase2(self, analysis: str, file_context: str) -> bool:
         from peas_agent.core import SkillsLoader, run_dream_react_turn
@@ -251,7 +254,10 @@ class Dream:
                 return f"Error running tool {name}: {e}"
 
         max_iter = int(self.dream_cfg.get("max_iterations", 10))
-        llm_tools = self._dream_llm.bind_tools(tools)
+        llm_tools = self.llm.bind_tools(tools)
+
+        def progress(iteration: int) -> None:
+            print(f"（Dream Phase 2：第 {iteration} 輪…）", flush=True)
 
         _, tool_events = run_dream_react_turn(
             llm_tools,
@@ -259,6 +265,7 @@ class Dream:
             phase2_user,
             max_iterations=max_iter,
             tool_runner=tool_runner,
+            on_iteration=progress,
         )
         return any(ev.get("status") == "ok" for ev in tool_events)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,7 @@ class MemoryStore:
         self.user_file = self.workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self._io_lock = threading.RLock()
         self.git = GitStore(
             self.workspace,
             tracked_files=[
@@ -88,60 +90,81 @@ class MemoryStore:
             return ""
 
     def read_memory(self) -> str:
-        return self.read_file(self.memory_file)
+        with self._io_lock:
+            return self.read_file(self.memory_file)
 
     def write_memory(self, content: str) -> None:
-        self.memory_file.write_text(content, encoding="utf-8")
+        with self._io_lock:
+            self.memory_file.write_text(content, encoding="utf-8")
 
     def read_soul(self) -> str:
-        return self.read_file(self.soul_file)
+        with self._io_lock:
+            return self.read_file(self.soul_file)
 
     def write_soul(self, content: str) -> None:
-        self.soul_file.write_text(content, encoding="utf-8")
+        with self._io_lock:
+            self.soul_file.write_text(content, encoding="utf-8")
 
     def read_user(self) -> str:
-        return self.read_file(self.user_file)
+        with self._io_lock:
+            return self.read_file(self.user_file)
 
     def write_user(self, content: str) -> None:
-        self.user_file.write_text(content, encoding="utf-8")
+        with self._io_lock:
+            self.user_file.write_text(content, encoding="utf-8")
 
     def read_pinned(self) -> list[str]:
-        if not self.pinned_file.is_file():
+        with self._io_lock:
+            if not self.pinned_file.is_file():
+                return []
+            try:
+                data = json.loads(self.pinned_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return []
+            if isinstance(data, list):
+                return [str(x) for x in data if str(x).strip()]
             return []
-        try:
-            data = json.loads(self.pinned_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
-        if isinstance(data, list):
-            return [str(x) for x in data if str(x).strip()]
-        return []
 
     def add_pin(self, keyword: str) -> None:
         keyword = keyword.strip()
         if not keyword:
             return
-        pins = self.read_pinned()
-        if keyword not in pins:
-            pins.append(keyword)
-            self.pinned_file.write_text(
-                json.dumps(pins, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
+        with self._io_lock:
+            if not self.pinned_file.is_file():
+                pins: list[str] = []
+            else:
+                try:
+                    data = json.loads(self.pinned_file.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    pins = []
+                else:
+                    pins = (
+                        [str(x) for x in data if str(x).strip()]
+                        if isinstance(data, list)
+                        else []
+                    )
+            if keyword not in pins:
+                pins.append(keyword)
+                self.pinned_file.write_text(
+                    json.dumps(pins, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
 
     def append_history(self, entry: str, *, session_key: str | None = None) -> int:
-        cursor = self._next_cursor()
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        record: dict[str, Any] = {
-            "cursor": cursor,
-            "timestamp": ts,
-            "content": entry.rstrip(),
-        }
-        if session_key:
-            record["session_key"] = session_key
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._cursor_file.write_text(str(cursor), encoding="utf-8")
-        return cursor
+        with self._io_lock:
+            cursor = self._next_cursor()
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            record: dict[str, Any] = {
+                "cursor": cursor,
+                "timestamp": ts,
+                "content": entry.rstrip(),
+            }
+            if session_key:
+                record["session_key"] = session_key
+            with open(self.history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._cursor_file.write_text(str(cursor), encoding="utf-8")
+            return cursor
 
     def raw_archive(self, text: str, *, session_key: str | None = None) -> int:
         return self.append_history(f"[RAW] {text}", session_key=session_key)
@@ -158,26 +181,30 @@ class MemoryStore:
         return 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
-        return [e for e in self._read_entries() if int(e.get("cursor", 0)) > since_cursor]
+        with self._io_lock:
+            return [e for e in self._read_entries() if int(e.get("cursor", 0)) > since_cursor]
 
     def compact_history(self) -> None:
-        if self.max_history_entries <= 0:
-            return
-        entries = self._read_entries()
-        if len(entries) <= self.max_history_entries:
-            return
-        self._write_entries(entries[-self.max_history_entries :])
+        with self._io_lock:
+            if self.max_history_entries <= 0:
+                return
+            entries = self._read_entries()
+            if len(entries) <= self.max_history_entries:
+                return
+            self._write_entries(entries[-self.max_history_entries :])
 
     def get_last_dream_cursor(self) -> int:
-        if self._dream_cursor_file.exists():
-            try:
-                return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
-                pass
-        return 0
+        with self._io_lock:
+            if self._dream_cursor_file.exists():
+                try:
+                    return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
+                except (ValueError, OSError):
+                    pass
+            return 0
 
     def set_last_dream_cursor(self, cursor: int) -> None:
-        self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
+        with self._io_lock:
+            self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
     def _read_entries(self) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []

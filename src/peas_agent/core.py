@@ -83,6 +83,7 @@ def _default_config() -> dict[str, Any]:
             "model": "gpt-5.4-mini",
             "temperature": 0.2,
             "base_url": "https://api.openai.com/v1",
+            "request_timeout": 120,
         },
         "tools": {
             "web": {
@@ -183,7 +184,12 @@ def init_workspace(workspace: Path) -> Path:
     return root
 
 
-def _build_llm(config: dict[str, Any]) -> ChatOpenAI:
+def _build_llm(
+    config: dict[str, Any],
+    *,
+    model: str | None = None,
+    timeout: float | None = None,
+) -> ChatOpenAI:
     llm_cfg = config.get("llm", {})
     if not isinstance(llm_cfg, dict):
         llm_cfg = {}
@@ -192,15 +198,33 @@ def _build_llm(config: dict[str, Any]) -> ChatOpenAI:
         raise RuntimeError(
             f"尚未設定 llm.api_key；請編輯 {_get_config_path()}。"
         )
+    raw_timeout = timeout
+    if raw_timeout is None:
+        raw_timeout = llm_cfg.get("request_timeout", 120)
+    try:
+        request_timeout = float(raw_timeout)
+    except (TypeError, ValueError):
+        request_timeout = 120.0
+
     kwargs: dict[str, Any] = {
         "api_key": api_key,
-        "model": llm_cfg.get("model", "gpt-5.4-mini"),
+        "model": model or llm_cfg.get("model", "gpt-5.4-mini"),
         "temperature": llm_cfg.get("temperature", 0.2),
+        "timeout": request_timeout,
     }
     base_url = (llm_cfg.get("base_url") or "").strip()
     if base_url:
         kwargs["base_url"] = base_url
     return ChatOpenAI(**kwargs)
+
+
+def _build_dream_llm(config: dict[str, Any]) -> ChatOpenAI:
+    dream_cfg = config.get("dream", {})
+    if not isinstance(dream_cfg, dict):
+        dream_cfg = {}
+    model_override = dream_cfg.get("model")
+    model = str(model_override).strip() if model_override else None
+    return _build_llm(config, model=model or None)
 
 
 def _validate_session_name(session_name: str) -> str:
@@ -1056,6 +1080,7 @@ def run_dream_react_turn(
     *,
     max_iterations: int = 10,
     tool_runner: Callable[[str, dict[str, Any]], str] | None = None,
+    on_iteration: Callable[[int], None] | None = None,
 ) -> tuple[str, list[dict[str, str]]]:
     """Dream Phase 2 ReAct with iteration cap; tool errors do not abort."""
 
@@ -1071,7 +1096,9 @@ def run_dream_react_turn(
     tool_events: list[dict[str, str]] = []
     final_text = ""
 
-    for _ in range(max_iterations):
+    for iteration in range(1, max_iterations + 1):
+        if on_iteration is not None:
+            on_iteration(iteration)
         response = llm_tools.invoke(messages)
         messages.append(response)
 
@@ -1598,7 +1625,7 @@ class Agent:
         )
         from peas_agent.dream_scheduler import ensure_dream_scheduler
 
-        ensure_dream_scheduler(resolved_workspace, config, llm=llm)
+        ensure_dream_scheduler(resolved_workspace, config)
         return agent
 
     def chat(
@@ -1619,19 +1646,45 @@ class Agent:
         history_human = history_human_placeholder(user_text, image_rel, media_type)
         human_for_send = build_human_message_for_current_turn(user_text, image_rel)
 
-        session_key = Path(self.session_path).name
-        self._maybe_cross_session_each_chat()
+        from peas_agent.chat_activity import chat_activity
 
-        prev_consolidated = self.last_consolidated
-        self.last_consolidated = ensure_budget_before_react(
-            self.llm,
-            self.history,
-            self.last_consolidated,
-            history_human,
-            self.store,
-            session_key=session_key,
-        )
-        if self.last_consolidated != prev_consolidated:
+        session_key = Path(self.session_path).name
+        with chat_activity():
+            self._maybe_cross_session_each_chat()
+
+            prev_consolidated = self.last_consolidated
+            self.last_consolidated = ensure_budget_before_react(
+                self.llm,
+                self.history,
+                self.last_consolidated,
+                history_human,
+                self.store,
+                session_key=session_key,
+            )
+            if self.last_consolidated != prev_consolidated:
+                if self.session_meta is None:
+                    self.session_meta = _default_metadata()
+                self.session_meta = save_session_jsonl(
+                    self.session_path,
+                    self.history,
+                    self.session_meta,
+                    self.last_consolidated,
+                )
+
+            system_text = build_system_prompt(self.store)
+            past = self.history[self.last_consolidated:]
+
+            final_text, turn_messages = run_react_turn(
+                self.llm_tools,
+                system_text,
+                past,
+                human_for_send,
+                history_human,
+                on_token=on_token,
+            )
+
+            self.history.extend(turn_messages)
+
             if self.session_meta is None:
                 self.session_meta = _default_metadata()
             self.session_meta = save_session_jsonl(
@@ -1640,34 +1693,11 @@ class Agent:
                 self.session_meta,
                 self.last_consolidated,
             )
-
-        system_text = build_system_prompt(self.store)
-        past = self.history[self.last_consolidated:]
-
-        final_text, turn_messages = run_react_turn(
-            self.llm_tools,
-            system_text,
-            past,
-            human_for_send,
-            history_human,
-            on_token=on_token,
-        )
-
-        self.history.extend(turn_messages)
-
-        if self.session_meta is None:
-            self.session_meta = _default_metadata()
-        self.session_meta = save_session_jsonl(
-            self.session_path,
-            self.history,
-            self.session_meta,
-            self.last_consolidated,
-        )
-        print(
-            f"（已寫入 {self.session_path!r}，共 {len(self.history)} 則累積訊息；"
-            f" last_consolidated={self.last_consolidated}。）"
-        )
-        return final_text
+            print(
+                f"（已寫入 {self.session_path!r}，共 {len(self.history)} 則累積訊息；"
+                f" last_consolidated={self.last_consolidated}。）"
+            )
+            return final_text
 
     def _maybe_cross_session_each_chat(self) -> None:
         dream_cfg = self.config.get("dream", {})
@@ -1684,11 +1714,16 @@ class Agent:
         )
 
     def dream(self) -> bool:
-        from peas_agent.dream import Dream
+        """Schedule Dream in a background thread; returns immediately if queued."""
+        from peas_agent.dream_runner import submit_background_dream
 
-        return Dream(
-            self.workspace, self.config, self.llm, store=self.store
-        ).run(active_session_path=self.session_path)
+        return submit_background_dream(
+            self.workspace,
+            self.config,
+            self.store,
+            _build_dream_llm(self.config),
+            session_path=self.session_path,
+        )
 
     def dream_log(self, sha: str | None = None) -> str:
         store = self.store

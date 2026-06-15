@@ -120,15 +120,17 @@ def test_bundled_soul_includes_clarification_rules() -> None:
     content = load_bundled_template("SOUL.md")
     assert content is not None
     assert "釐清與反思" in content
-    assert "需求或意圖" in content
-    assert "意圖已確認" in content
+    assert "不要套話開場" in content
+    assert "開場範例" in content
+    assert "禁止" in content and "我理解" in content
 
 
 def test_bundled_user_includes_communication_contract() -> None:
     content = load_bundled_template("USER.md")
     assert content is not None
     assert "特殊指示" in content
-    assert "輕量反思" in content
+    assert "直接回覆或動手" in content
+    assert "開頭直接進主題" in content
     assert "繁體中文" in content
 
 

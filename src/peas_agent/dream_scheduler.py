@@ -7,9 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from langchain_openai import ChatOpenAI
-
-from peas_agent.dream import Dream, get_workspace_lock
+from peas_agent.chat_activity import is_chat_active
+from peas_agent.dream import Dream
 
 _schedulers: dict[str, DreamScheduler] = {}
 _registry_lock = threading.Lock()
@@ -20,11 +19,12 @@ class DreamScheduler:
         self,
         workspace: Path,
         config: dict[str, Any],
-        llm: ChatOpenAI,
     ) -> None:
         self.workspace = workspace.expanduser().resolve()
         self.config = config
-        self.llm = llm
+        from peas_agent.core import _build_dream_llm
+
+        self.dream_llm = _build_dream_llm(config)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._dream_cfg = self._dream_config()
@@ -78,15 +78,16 @@ class DreamScheduler:
                     break
 
     def _tick(self) -> None:
-        dream = Dream(self.workspace, self.config, self.llm)
+        if is_chat_active():
+            print("（Dream 排程延後：chat 進行中。）", flush=True)
+            return
+        dream = Dream(self.workspace, self.config, self.dream_llm)
         dream.run(active_session_path=None)
 
 
 def ensure_dream_scheduler(
     workspace: Path,
     config: dict[str, Any],
-    *,
-    llm: ChatOpenAI,
 ) -> DreamScheduler | None:
     dream_cfg = config.get("dream", {})
     if isinstance(dream_cfg, dict) and not dream_cfg.get("enabled", True):
@@ -97,7 +98,7 @@ def ensure_dream_scheduler(
         existing = _schedulers.get(key)
         if existing is not None:
             return existing
-        scheduler = DreamScheduler(workspace, config, llm)
+        scheduler = DreamScheduler(workspace, config)
         scheduler.start()
         _schedulers[key] = scheduler
         return scheduler

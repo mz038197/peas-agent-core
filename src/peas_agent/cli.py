@@ -59,7 +59,7 @@ def _run_chat(args: argparse.Namespace) -> None:
     if isinstance(dream_cfg, dict) and dream_cfg.get("enabled", True):
         from peas_agent.dream_scheduler import ensure_dream_scheduler
 
-        scheduler = ensure_dream_scheduler(agent.workspace, agent.config, llm=agent.llm)
+        scheduler = ensure_dream_scheduler(agent.workspace, agent.config)
         if scheduler:
             nxt = scheduler.next_run_at()
             if nxt:
@@ -72,6 +72,12 @@ def _run_chat(args: argparse.Namespace) -> None:
     pending_image: str | None = None
 
     while True:
+        from peas_agent.dream_runner import poll_dream_message
+
+        dream_msg = poll_dream_message(agent.workspace)
+        if dream_msg:
+            print(dream_msg)
+
         user_line = input("\n你：").strip()
         if user_line.lower() in ("quit", "exit", "q"):
             print("再見！")
@@ -81,7 +87,11 @@ def _run_chat(args: argparse.Namespace) -> None:
 
         if user_line == "/dream":
             ok = agent.dream()
-            print("（Dream 完成。）" if ok else "（Dream：無待處理 history 或正在執行中。）")
+            print(
+                "（Dream 已開始背景執行…）"
+                if ok
+                else "（Dream：已在背景執行中或 workspace lock 被佔用。）"
+            )
             continue
         if user_line.startswith("/dream-log"):
             parts = user_line.split(maxsplit=1)
