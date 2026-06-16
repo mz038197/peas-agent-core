@@ -19,6 +19,17 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 DREAM_PHASE1_PATH = PACKAGE_DIR / "prompts" / "dream_phase1.md"
 DREAM_PHASE2_PATH = PACKAGE_DIR / "prompts" / "dream_phase2.md"
 
+_EPHEMERAL_MEMORY_PATTERNS = (
+    "數到",
+    "數數",
+    "每秒數",
+    "每秒",
+    "手動接續",
+    "連續數",
+    "不要中斷",
+    "不喜歡計數突然中斷",
+)
+
 _workspace_locks: dict[str, threading.Lock] = {}
 _lock_registry = threading.Lock()
 
@@ -126,6 +137,7 @@ class Dream:
             return False
 
         analysis = analysis.strip()
+        analysis = self._filter_analysis(analysis)
         if self._is_skip_only(analysis):
             self._finalize(batch, had_changes=False)
             return True
@@ -171,6 +183,16 @@ class Dream:
             return True
         non_skip = [line for line in lines if line.upper() != "[SKIP]"]
         return not non_skip
+
+    @staticmethod
+    def _filter_analysis(analysis: str) -> str:
+        kept: list[str] = []
+        for line in analysis.splitlines():
+            stripped = line.strip()
+            if _is_ephemeral_user_or_soul_memory(stripped):
+                continue
+            kept.append(line)
+        return "\n".join(kept).strip()
 
     def _run_phase2(self, analysis: str, file_context: str) -> bool:
         from peas_agent.core import SkillsLoader, run_dream_react_turn
@@ -308,3 +330,10 @@ def _build_dream_tools(workspace: Path) -> list[Any]:
             return f"Error: {e}"
 
     return [dream_read_file, dream_write_file, dream_edit_file]
+
+
+def _is_ephemeral_user_or_soul_memory(line: str) -> bool:
+    upper = line.upper()
+    if not (upper.startswith("[FILE] USER:") or upper.startswith("[FILE] SOUL:")):
+        return False
+    return any(pattern in line for pattern in _EPHEMERAL_MEMORY_PATTERNS)

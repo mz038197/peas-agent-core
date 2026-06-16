@@ -7,6 +7,7 @@ history 中有 durable 事實，但 USER/SOUL/MEMORY 沒有 → `[FILE]`
 
 **Step B — Preferences（偏好）**
 隱式或顯式偏好、約束、回覆指示 → `[FILE] USER` 或 `[FILE] SOUL`
+只保留長期、跨任務仍有用、可泛化的偏好。一次性測試、遊戲互動、臨時指令、角色扮演、單次任務要求不可寫入 USER/SOUL。
 
 **Step C — Freshness（時效）**
 比對 Current Date 與既有 bullet 的 `(as-of: YYYY-MM-DD)` 或事件語意
@@ -36,5 +37,7 @@ history 中有 durable 事實，但 USER/SOUL/MEMORY 沒有 → `[FILE]`
 - 時效性超過 14 天的一次性事件、已完成任務、已 merge 的 PR → 考慮 REMOVE 或縮短
 - Skill：history 中**同一可重複 workflow 出現 2+ 次**、有明確步驟、值得獨立 instruction set → `[SKILL]`
 - 不要加入：當日天氣、暫時性錯誤、閒聊 filler
+- 不要加入：一次性測試或互動要求，例如「慢慢數到 10」、「每秒數一次」、「連續數數」、「手動接續」、「不要中斷計數」
+- USER/SOUL 只記 durable facts：語言偏好、回覆風格、常用工具、長期工作流程偏好；不要把單次 prompt 行為推斷成長期偏好
 
 若全部無變更 → 只輸出 `[SKIP]`（可跳過 Phase 2）。

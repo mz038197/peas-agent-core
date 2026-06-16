@@ -19,6 +19,8 @@
 - 刪除：以 section + bullets 為 old_text，new_text 留空
 - 只做 surgical edit，禁止整檔覆寫
 - 若無需更新，不要呼叫工具
+- 不要把一次性測試、遊戲互動、臨時指令、角色扮演或單次任務要求寫入 USER/SOUL；若 Analysis Result 仍包含這類內容，直接忽略
+- USER/SOUL 只接受長期、跨任務仍有用、可泛化的偏好，例如語言、回覆風格、常用工具、長期工作流程偏好
 
 ## Skill 建立（[SKILL]）
 

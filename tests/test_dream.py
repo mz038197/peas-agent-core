@@ -68,3 +68,34 @@ def test_dream_runs_phase2_for_file_updates(dream_env: tuple[Path, MagicMock]) -
         assert dream.run() is True
         mock_phase2.assert_called_once()
     assert store.get_last_dream_cursor() == 1
+
+
+def test_dream_filters_ephemeral_counting_preferences(
+    dream_env: tuple[Path, MagicMock],
+) -> None:
+    workspace, llm = dream_env
+    store = get_memory_store()
+    store.append_history("請慢慢數到 10，每秒數一次")
+    llm.invoke.return_value = MagicMock(
+        content="\n".join(
+            [
+                "[FILE] USER: 曾要求慢慢數到 10",
+                "[FILE] USER: 想要「每秒數一次」的效果",
+                "[FILE] USER: 偏好繁中簡潔回覆",
+            ]
+        )
+    )
+
+    dream = Dream(
+        workspace,
+        {"dream": {"cross_session_archive": False}},
+        llm,
+    )
+    with patch.object(Dream, "_run_phase2", return_value=True) as mock_phase2:
+        assert dream.run() is True
+        mock_phase2.assert_called_once()
+        filtered_analysis = mock_phase2.call_args.args[0]
+
+    assert "慢慢數到 10" not in filtered_analysis
+    assert "每秒數一次" not in filtered_analysis
+    assert "[FILE] USER: 偏好繁中簡潔回覆" in filtered_analysis
