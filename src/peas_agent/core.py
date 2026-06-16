@@ -85,6 +85,7 @@ def _default_config() -> dict[str, Any]:
             "base_url": "https://api.openai.com/v1",
             "request_timeout": 120,
         },
+        "exec": {"default_timeout": 120},
         "tools": {
             "web": {
                 "enable": True,
@@ -483,9 +484,79 @@ def list_dir(path: str, recursive: bool = False, max_entries: int = 200) -> str:
         return f"Error: {e}"
 
 
+_READ_IMAGE_ALLOWED_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+_READ_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+
+
+def get_exec_default_timeout() -> int:
+    exec_cfg = _ACTIVE_CONFIG.get("exec", {})
+    if isinstance(exec_cfg, dict):
+        try:
+            n = int(exec_cfg.get("default_timeout", 120))
+            return n if n > 0 else 120
+        except (TypeError, ValueError):
+            pass
+    return 120
+
+
+def _analyze_image_with_vision(
+    path: str, question: str, data: bytes, media_type: str
+) -> str:
+    llm = _build_llm(_ACTIVE_CONFIG)
+    prompt = (question or "").strip() or "描述此截圖內容。"
+    blocks: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    blocks.append(
+        {
+            "type": "image_url",
+            "image_url": {"url": image_bytes_to_data_url(data, media_type)},
+        }
+    )
+    response = llm.invoke([HumanMessage(content=blocks)])
+    content = response.content
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        body = "\n".join(p for p in parts if p).strip()
+        return body or str(content).strip()
+    return str(content).strip()
+
+
+@tool("read_image")
+def read_image(path: str, question: str = "描述此截圖內容。") -> str:
+    """分析專案內 PNG/JPEG/WebP 截圖（nested vision），回傳文字描述供自我驗證。"""
+    try:
+        target = resolve_project_image_path(path)
+        if not target.is_file():
+            return f"Error: not a file: {path}"
+        suffix = target.suffix.lower()
+        if suffix not in _READ_IMAGE_ALLOWED_SUFFIXES:
+            allowed = ", ".join(sorted(_READ_IMAGE_ALLOWED_SUFFIXES))
+            return f"Error: unsupported image type: {suffix or '(no extension)'} (use {allowed})"
+        size = target.stat().st_size
+        if size > _READ_IMAGE_MAX_BYTES:
+            return f"Error: image too large ({size} bytes; max {_READ_IMAGE_MAX_BYTES})"
+        media_type = guess_media_type(target)
+        data = target.read_bytes()
+        analysis = _analyze_image_with_vision(path, question, data, media_type)
+        if not analysis:
+            return f"Error: vision model returned empty response for {path}"
+        q = (question or "").strip() or "描述此截圖內容。"
+        return f"[read_image: {path}]\nQuestion: {q}\nAnalysis:\n{analysis}"
+    except RuntimeError as e:
+        return f"Error: {e}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 @tool("exec")
-def exec_workspace(command: str, timeout: int = 30, cwd: str | None = None) -> str:
+def exec_workspace(command: str, timeout: int | None = None, cwd: str | None = None) -> str:
     """執行 shell 指令（已阻擋常見危險片段）。可選 cwd 指定工作目錄；預設為 project root。"""
+    if timeout is None:
+        timeout = get_exec_default_timeout()
     blocked = ("rm -rf", "del /f", "rmdir /s", "format", "shutdown")
     lowered = command.lower()
     if any(part in lowered for part in blocked):
@@ -534,6 +605,7 @@ def _get_builtin_tools() -> list[Any]:
     tools: list[Any] = [
         add_numbers,
         read_file,
+        read_image,
         write_file,
         edit_file,
         list_dir,

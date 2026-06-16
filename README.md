@@ -22,6 +22,9 @@ uv sync
 {
   "workspace": "~/.peas-agent/workspace",
   "token_budget": 100000,
+  "exec": {
+    "default_timeout": 120
+  },
   "llm": {
     "api_key": "sk-...",
     "model": "gpt-5.4-mini",
@@ -30,6 +33,8 @@ uv sync
   }
 }
 ```
+
+`exec.default_timeout` 為 shell `exec` 工具未指定 `timeout` 時的秒數（預設 120）。`read_image` 需使用支援 vision 的 `llm.model`（與 CLI `/image` 相同）。
 
 也可透過環境變數 `PEAS_AGENT_WORKSPACE` 或 CLI `-w` 覆寫 workspace。
 

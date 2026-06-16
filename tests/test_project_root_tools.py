@@ -60,3 +60,39 @@ def test_exec_defaults_to_project_root(tmp_path: Path, monkeypatch) -> None:
         exec_workspace.invoke({"command": "echo hi"})
 
     assert mock_run.call_args.kwargs["cwd"] == str(project.resolve())
+
+
+def test_exec_default_timeout_from_config(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project.resolve())
+    monkeypatch.setattr(
+        "peas_agent.core._ACTIVE_CONFIG",
+        {"exec": {"default_timeout": 120}},
+    )
+
+    with patch("peas_agent.core.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = b"ok"
+        mock_run.return_value.stderr = b""
+        exec_workspace.invoke({"command": "echo hi"})
+
+    assert mock_run.call_args.kwargs["timeout"] == 120
+
+
+def test_exec_explicit_timeout_overrides_config(tmp_path: Path, monkeypatch) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project.resolve())
+    monkeypatch.setattr(
+        "peas_agent.core._ACTIVE_CONFIG",
+        {"exec": {"default_timeout": 120}},
+    )
+
+    with patch("peas_agent.core.subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = b"ok"
+        mock_run.return_value.stderr = b""
+        exec_workspace.invoke({"command": "echo hi", "timeout": 45})
+
+    assert mock_run.call_args.kwargs["timeout"] == 45

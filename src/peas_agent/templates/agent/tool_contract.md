@@ -40,7 +40,7 @@ documents the general tool contract and non-obvious usage patterns.
 - Prefer dedicated file/search tools over `cat`, shell `find`, shell `grep`, `sed`, or `echo` for ordinary inspection and edits.
 - `exec` accepts an optional `cwd`; use it when a command must run outside the default project root directory.
 - Use non-interactive flags such as `-y` or `--yes` when available.
-- Commands have a configurable timeout (default 60s), dangerous commands are blocked, and output is truncated.
+- Commands have a configurable timeout (default 120s), dangerous commands are blocked, and output is truncated.
 - For long-running or interactive commands, pass `yield_time_ms`; if the process keeps running, continue with `write_stdin`.
 - Use `write_stdin` to poll, provide stdin, close stdin, wait for expected output with `wait_for`, or terminate an existing exec session.
 - Use `list_exec_sessions` to recover active session IDs after context shifts.
@@ -67,6 +67,7 @@ documents the general tool contract and non-obvious usage patterns.
 - Use `message` to send content or local media to the user/channel.
 - `read_file` only reads content for your analysis; it does not deliver a file to the user.
 - When sending an existing local file, attach it through the message/media mechanism instead of pasting file contents unless the user asked for text.
+- Use `read_image` to analyze PNG/JPEG/WebP screenshots under the project root (nested vision: returns text analysis in the tool result). Requires a vision-capable `llm.model` in config (same as `/image`). For Webwright self-verify, call it per checkpoint screenshot with a specific `question`; if it fails, fall back to `final_script_log.txt`, ARIA snapshots, URL/title.
 
 ## Scheduling and Background Work
 
