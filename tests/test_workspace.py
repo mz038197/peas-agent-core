@@ -9,7 +9,6 @@ from unittest.mock import patch
 import pytest
 
 from peas_agent.core import (
-    PACKAGE_DIR,
     Agent,
     SkillsLoader,
     _build_llm,
@@ -22,6 +21,7 @@ from peas_agent.core import (
     _validate_session_name,
     get_token_budget,
     init_workspace,
+    read_file,
 )
 
 
@@ -146,12 +146,35 @@ def test_get_token_budget_reads_active_config(monkeypatch: pytest.MonkeyPatch) -
     assert get_token_budget() == 250000
 
 
-def test_skills_loader_reads_package_builtin(peas_home: Path) -> None:
+def test_init_workspace_syncs_bundled_skills_next_to_workspace_skills(
+    peas_home: Path,
+) -> None:
     ws = init_workspace(peas_home / "workspace")
-    loader = SkillsLoader(ws, builtin_dir=PACKAGE_DIR / "builtin_skills")
+    assert (ws / "builtin_skills" / "always-on" / "SKILL.md").is_file()
+    assert not (ws / "skills" / "always-on" / "SKILL.md").exists()
+
+    loader = SkillsLoader(ws)
     entries = loader.list_skills()
-    names = {e.name for e in entries}
-    assert "always-on" in names or "demo" in names
+    entries_by_name = {e.name: e for e in entries}
+    assert entries_by_name["always-on"].source == "builtin"
+    assert entries_by_name["always-on"].path == "builtin_skills/always-on/SKILL.md"
+
+
+def test_read_file_resolves_workspace_builtin_skills_path(
+    peas_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = init_workspace(peas_home / "workspace")
+    project = peas_home / "project"
+    project.mkdir()
+    monkeypatch.setattr("peas_agent.core.WORKSPACE", ws)
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project)
+
+    result = read_file.invoke(
+        {"path": "builtin_skills/skill-creator/SKILL.md", "offset": 1, "limit": 3}
+    )
+
+    assert "SKILL.md 格式參考" in result
 
 
 def test_resolve_project_root_explicit_path(tmp_path: Path) -> None:

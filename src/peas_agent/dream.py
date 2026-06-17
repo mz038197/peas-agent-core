@@ -197,14 +197,13 @@ class Dream:
     def _run_phase2(self, analysis: str, file_context: str) -> bool:
         from peas_agent.core import SkillsLoader, run_dream_react_turn
 
-        skill_creator = PACKAGE_DIR / "builtin_skills" / "skill-creator" / "SKILL.md"
         phase2_template = DREAM_PHASE2_PATH.read_text(encoding="utf-8")
         phase2_system = phase2_template.replace(
             "{{ skill_creator_path }}",
             f"builtin_skills/skill-creator/SKILL.md",
         )
 
-        loader = SkillsLoader(self.workspace, builtin_dir=PACKAGE_DIR / "builtin_skills")
+        loader = SkillsLoader(self.workspace)
         skills = loader.list_skills()
         skills_section = ""
         if skills:

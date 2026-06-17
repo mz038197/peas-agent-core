@@ -16,6 +16,7 @@ import locale
 import os
 import platform
 import re
+import shutil
 import subprocess
 import uuid
 from collections.abc import Callable
@@ -180,8 +181,36 @@ def init_workspace(workspace: Path) -> Path:
     (root / "memory").mkdir(parents=True, exist_ok=True)
     (root / "sessions").mkdir(parents=True, exist_ok=True)
     (root / "skills").mkdir(parents=True, exist_ok=True)
+    (root / "builtin_skills").mkdir(parents=True, exist_ok=True)
     (root / "tools").mkdir(parents=True, exist_ok=True)
+    sync_bundled_skills(root, silent=True)
     return root
+
+
+def sync_bundled_skills(workspace: Path, *, silent: bool = False) -> list[str]:
+    """Install bundled default skills into workspace/builtin_skills when missing."""
+    bundled_root = PACKAGE_DIR / "builtin_skills"
+    skills_root = workspace / "builtin_skills"
+    added: list[str] = []
+    if not bundled_root.is_dir():
+        return added
+
+    skills_root.mkdir(parents=True, exist_ok=True)
+    for source_dir in sorted(bundled_root.iterdir(), key=lambda p: p.name):
+        skill_file = source_dir / "SKILL.md"
+        if not source_dir.is_dir() or not skill_file.is_file():
+            continue
+        target_dir = skills_root / source_dir.name
+        if target_dir.exists():
+            continue
+        shutil.copytree(source_dir, target_dir)
+        rel = target_dir.relative_to(workspace).as_posix()
+        added.append(rel)
+
+    if added and not silent:
+        for name in added:
+            print(f"  Created {name}")
+    return added
 
 
 def _build_llm(
@@ -286,10 +315,7 @@ def _configure_runtime(
     _ACTIVE_CONFIG = config
     configure_web(config)
     _set_memory_paths(workspace)
-    SKILLS_LOADER = SkillsLoader(
-        workspace,
-        builtin_dir=PACKAGE_DIR / "builtin_skills",
-    )
+    SKILLS_LOADER = SkillsLoader(workspace)
     TOOLS_LOADER = ToolsLoader(workspace)
     return configure_memory_store(workspace)
 
@@ -411,12 +437,16 @@ def resolve_workspace_path(path: str) -> Path:
 
 
 def _resolve_readable_path(path: str) -> Path:
-    """Resolve a readable file path, with package builtin_skills/ as a relative-path fallback."""
+    """Resolve a readable file path, with bundled package files as a fallback."""
     target = resolve_project_path(path)
     if target.is_file():
         return target
 
     if not Path(path).is_absolute():
+        workspace_target = (WORKSPACE / path).expanduser().resolve()
+        if workspace_target.is_file():
+            return workspace_target
+
         pkg_target = (PACKAGE_DIR / path).expanduser().resolve()
         if pkg_target.is_file():
             return pkg_target
@@ -1407,14 +1437,18 @@ class SkillsLoader:
     ) -> None:
         self.workspace = workspace.resolve()
         self.workspace_skills = self.workspace / "skills"
-        self.builtin_skills = (builtin_dir or PACKAGE_DIR / "builtin_skills").resolve()
+        self.builtin_skills = (
+            builtin_dir.resolve() if builtin_dir else self.workspace / "builtin_skills"
+        )
 
     def _skill_path_for_read(self, skill_file: Path) -> str:
         resolved = skill_file.resolve()
         try:
             return resolved.relative_to(self.workspace).as_posix()
         except ValueError:
-            return resolved.relative_to(self.builtin_skills.parent).as_posix()
+            if self.builtin_skills is not None:
+                return resolved.relative_to(self.builtin_skills.parent).as_posix()
+            return resolved.as_posix()
 
     def _entries_from_dir(
         self, root: Path, source: str, skip: set[str]
@@ -1445,6 +1479,9 @@ class SkillsLoader:
         workspace_entries = self._entries_from_dir(
             self.workspace_skills, "workspace", set()
         )
+        if self.builtin_skills is None:
+            return workspace_entries
+
         workspace_names = {entry.name for entry in workspace_entries}
         builtin_entries = self._entries_from_dir(
             self.builtin_skills, "builtin", workspace_names
@@ -1452,7 +1489,10 @@ class SkillsLoader:
         return workspace_entries + builtin_entries
 
     def load_skill(self, name: str) -> str | None:
-        for root in (self.workspace_skills, self.builtin_skills):
+        roots = [self.workspace_skills]
+        if self.builtin_skills is not None:
+            roots.append(self.builtin_skills)
+        for root in roots:
             path = root / name / "SKILL.md"
             if path.is_file():
                 return path.read_text(encoding="utf-8")
