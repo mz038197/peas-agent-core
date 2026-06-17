@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from peas_agent.llm_content import extract_answer_text
 from peas_agent.memory_archive import cross_session_archive
 from peas_agent.memory_store import MemoryStore, configure_memory_store, get_memory_store
 from peas_agent.memory_summary import regenerate_memory_summary
@@ -128,15 +129,10 @@ class Dream:
                     HumanMessage(content=phase1_user),
                 ]
             )
-            analysis = (
-                phase1_response.content
-                if isinstance(phase1_response.content, str)
-                else str(phase1_response.content)
-            )
+            analysis = extract_answer_text(phase1_response).strip()
         except Exception:
             return False
 
-        analysis = analysis.strip()
         analysis = self._filter_analysis(analysis)
         if self._is_skip_only(analysis):
             self._finalize(batch, had_changes=False)

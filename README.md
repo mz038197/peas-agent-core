@@ -29,10 +29,15 @@ uv sync
     "api_key": "sk-...",
     "model": "gpt-5.4-mini",
     "temperature": 0.7,
-    "base_url": ""
+    "base_url": "",
+    "use_responses_api": true,
+    "output_version": "responses/v1",
+    "reasoning": { "effort": "medium", "summary": "auto" }
   }
 }
 ```
+
+`use_responses_api` 為 `true` 時走 OpenAI `/v1/responses`（Agent Studio 右欄可串流「思考過程」）。若代理不支援 Responses API，設為 `false` 即可退回 Chat Completions。啟動時會自動 deep-merge 缺漏欄位至既有 `config.json`（不覆蓋你已設定的值）。
 
 `exec.default_timeout` 為 shell `exec` 工具未指定 `timeout` 時的秒數（預設 120）。`read_image` 需使用支援 vision 的 `llm.model`（與 CLI `/image` 相同）。
 
@@ -85,6 +90,8 @@ from peas_agent import Agent
 agent = Agent.create(workspace="./my-workspace", session_name="chat.jsonl")
 reply = agent.chat("你好")
 ```
+
+串流 callback（例如 Agent Studio Shell）：`on_token`、`on_reasoning`、`on_stream_reset` 為 optional keyword 參數。
 
 ## 開發
 

@@ -7,6 +7,7 @@ from pathlib import Path
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
+from peas_agent.llm_content import extract_answer_text
 from peas_agent.memory_store import MemoryStore
 
 MAX_ARCHIVE_CHUNK_MESSAGES = 60
@@ -50,8 +51,7 @@ def invoke_archive_summary(consolidation_llm: ChatOpenAI, chunk_text: str) -> st
             HM(content=chunk_text),
         ]
     )
-    content = response.content if isinstance(response.content, str) else str(response.content)
-    summary = content.strip()
+    summary = extract_answer_text(response).strip()
     if not summary or summary.lower() == "(nothing)":
         return None
     return summary

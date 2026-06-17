@@ -4,7 +4,7 @@ Agent Workshop 核心（agent_core.py）— WG-12～21 邏輯 + WG-22 `Agent` �
 對齊 `challenges-agent-workshop.md`（**WG-12～22**）；CLI 進入點見 **`main.py`**。
 學生 CLI 進入點：**`main.py`**（`from agent_core import Agent`）。
 
-公開 API：`Agent.create(workspace=..., session_name=...)`、`Agent.chat(user_text, *, image_path=..., on_token=...)`
+公開 API：`Agent.create(workspace=..., session_name=...)`、`Agent.chat(user_text, *, image_path=..., on_token=..., on_reasoning=..., on_stream_reset=...)`
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from peas_agent.prompt_templates import (
     render_template,
     sync_workspace_templates,
 )
+from peas_agent.llm_content import estimate_ai_message_text_length, extract_answer_text, iter_chunk_deltas
 from peas_agent.memory_archive import archive_session_chunk
 from peas_agent.memory_store import MemoryStore, configure_memory_store, get_memory_store
 from peas_agent.tools_loader import (
@@ -85,6 +86,9 @@ def _default_config() -> dict[str, Any]:
             "temperature": 0.2,
             "base_url": "https://api.openai.com/v1",
             "request_timeout": 120,
+            "use_responses_api": True,
+            "output_version": "responses/v1",
+            "reasoning": {"effort": "medium", "summary": "auto"},
         },
         "exec": {"default_timeout": 120},
         "tools": {
@@ -114,27 +118,57 @@ def _default_config() -> dict[str, Any]:
     }
 
 
+def _merge_config_defaults(
+    loaded: dict[str, Any],
+    defaults: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Deep-merge missing keys from defaults into loaded. Never overwrite existing values."""
+    changed = False
+    merged: dict[str, Any] = dict(loaded)
+    for key, default_value in defaults.items():
+        if key not in merged:
+            merged[key] = copy.deepcopy(default_value)
+            changed = True
+            continue
+        current = merged[key]
+        if isinstance(default_value, dict) and isinstance(current, dict):
+            nested, nested_changed = _merge_config_defaults(current, default_value)
+            if nested_changed:
+                merged[key] = nested
+                changed = True
+    return merged, changed
+
+
 def _ensure_config() -> dict[str, Any]:
     path = _get_config_path()
+    defaults = _default_config()
     if not path.is_file():
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = _default_config()
         path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(defaults, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         print(
             f"已建立設定檔 {path}；請編輯 llm.api_key 後重新執行。"
         )
-        return data
+        return defaults
 
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         print(f"警告：{path} 不是有效 JSON，使用內建預設值。")
-        return _default_config()
+        return defaults
 
-    return loaded if isinstance(loaded, dict) else _default_config()
+    if not isinstance(loaded, dict):
+        return defaults
+
+    merged, changed = _merge_config_defaults(loaded, defaults)
+    if changed:
+        path.write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return merged
 
 
 def _resolve_workspace(
@@ -244,6 +278,17 @@ def _build_llm(
     base_url = (llm_cfg.get("base_url") or "").strip()
     if base_url:
         kwargs["base_url"] = base_url
+
+    use_responses_api = llm_cfg.get("use_responses_api")
+    if use_responses_api is True:
+        kwargs["use_responses_api"] = True
+        output_version = (llm_cfg.get("output_version") or "").strip()
+        if output_version:
+            kwargs["output_version"] = output_version
+        reasoning_cfg = llm_cfg.get("reasoning")
+        if isinstance(reasoning_cfg, dict) and reasoning_cfg:
+            kwargs["reasoning"] = dict(reasoning_cfg)
+
     return ChatOpenAI(**kwargs)
 
 
@@ -394,17 +439,22 @@ def _stream_model_response(
     llm_tools: ChatOpenAI,
     messages: list[BaseMessage],
     on_token: Callable[[str], None] | None = None,
+    on_reasoning: Callable[[str], None] | None = None,
 ) -> AIMessage:
     """串流累積為 AIMessage；僅印模型文字，工具執行由呼叫端處理。"""
     acc: AIMessageChunk | None = None
     for chunk in llm_tools.stream(messages):
         acc = chunk if acc is None else acc + chunk
-        content = chunk.content
-        if isinstance(content, str) and content:
-            if on_token is not None:
-                on_token(content)
+        for kind, delta in iter_chunk_deltas(chunk):
+            if not delta:
+                continue
+            if kind == "reasoning":
+                if on_reasoning is not None:
+                    on_reasoning(delta)
+            elif on_token is not None:
+                on_token(delta)
             else:
-                print(content, end="", flush=True)
+                print(delta, end="", flush=True)
     if acc is None:
         raise RuntimeError("模型串流未回傳任何 chunk")
     return message_chunk_to_message(acc)
@@ -542,17 +592,7 @@ def _analyze_image_with_vision(
         }
     )
     response = llm.invoke([HumanMessage(content=blocks)])
-    content = response.content
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        body = "\n".join(p for p in parts if p).strip()
-        return body or str(content).strip()
-    return str(content).strip()
+    return extract_answer_text(response)
 
 
 @tool("read_image")
@@ -731,7 +771,11 @@ def _message_to_jsonl_line(m: BaseMessage) -> str | None:
             if media_type:
                 row["media_type"] = media_type
     elif isinstance(m, AIMessage):
-        row = {"role": "assistant", "content": m.content, "timestamp": ts}
+        row = {
+            "role": "assistant",
+            "content": extract_answer_text(m),
+            "timestamp": ts,
+        }
         tc = getattr(m, "tool_calls", None)
         if tc:
             row["tool_calls"] = _serialize_tool_calls(tc)
@@ -1006,6 +1050,8 @@ def get_token_budget() -> int:
 def estimate_message_tokens(message: BaseMessage) -> int:
     if isinstance(message, HumanMessage):
         return _human_text_length(message)
+    if isinstance(message, AIMessage):
+        return estimate_ai_message_text_length(message)
     content = message.content
     return len(content) if isinstance(content, str) else 0
 
@@ -1126,6 +1172,8 @@ def run_react_turn(
     human_message: HumanMessage,
     history_human: HumanMessage | None = None,
     on_token: Callable[[str], None] | None = None,
+    on_reasoning: Callable[[str], None] | None = None,
+    on_stream_reset: Callable[[], None] | None = None,
 ) -> tuple[str, list[BaseMessage]]:
     """單輪 ReAct：stream → tool_calls → ToolMessage 迴圈，直到純文字回覆。
 
@@ -1142,11 +1190,18 @@ def run_react_turn(
 
     while True:
         messages = messages_for_model(messages)
-        response = _stream_model_response(llm_tools, messages, on_token=on_token)
+        response = _stream_model_response(
+            llm_tools,
+            messages,
+            on_token=on_token,
+            on_reasoning=on_reasoning,
+        )
         messages.append(response)
         print()
 
         if response.tool_calls:
+            if on_stream_reset is not None:
+                on_stream_reset()
             for tc in response.tool_calls:
                 name = str(tc["name"])
                 raw_args = dict(tc.get("args") or {})
@@ -1165,12 +1220,7 @@ def run_react_turn(
     turn_messages = messages[idx_turn_start:]
     if history_human is not None and turn_messages:
         turn_messages = [history_human, *turn_messages[1:]]
-    final_content = response.content
-    final_text = (
-        final_content.strip()
-        if isinstance(final_content, str)
-        else str(final_content).strip()
-    )
+    final_text = extract_answer_text(response)
     return final_text, turn_messages
 
 
@@ -1204,8 +1254,7 @@ def run_dream_react_turn(
         messages.append(response)
 
         if not getattr(response, "tool_calls", None):
-            content = response.content
-            final_text = content.strip() if isinstance(content, str) else str(content).strip()
+            final_text = extract_answer_text(response)
             break
 
         for tc in response.tool_calls:
@@ -1307,7 +1356,9 @@ def _message_plaintext(message: BaseMessage) -> str:
             else _human_to_text_only_for_model(message).content
         )
     else:
-        content = message.content if isinstance(message.content, str) else str(message.content)
+        content = extract_answer_text(message) if isinstance(message, AIMessage) else (
+            message.content if isinstance(message.content, str) else str(message.content)
+        )
     extra = ""
     if isinstance(message, AIMessage) and message.tool_calls:
         names = [
@@ -1367,7 +1418,7 @@ def _invoke_consolidation(
             HumanMessage(content=user_prompt),
         ]
     )
-    content = response.content if isinstance(response.content, str) else str(response.content)
+    content = extract_answer_text(response)
     return _parse_consolidation_json(content)
 
 
@@ -1745,6 +1796,8 @@ class Agent:
         *,
         image_path: str | None = None,
         on_token: Callable[[str], None] | None = None,
+        on_reasoning: Callable[[str], None] | None = None,
+        on_stream_reset: Callable[[], None] | None = None,
     ) -> str:
         image_rel = image_path
         media_type: str | None = None
@@ -1792,6 +1845,8 @@ class Agent:
                 human_for_send,
                 history_human,
                 on_token=on_token,
+                on_reasoning=on_reasoning,
+                on_stream_reset=on_stream_reset,
             )
 
             self.history.extend(turn_messages)

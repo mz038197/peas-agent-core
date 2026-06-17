@@ -41,6 +41,8 @@ def test_default_config_shape() -> None:
     assert cfg["token_budget"] == 100000
     assert cfg["llm"]["model"] == "gpt-5.4-mini"
     assert cfg["llm"]["api_key"] == ""
+    assert cfg["llm"]["use_responses_api"] is True
+    assert cfg["llm"]["output_version"] == "responses/v1"
 
 
 def test_ensure_config_scaffolds_on_first_run(peas_home: Path) -> None:
