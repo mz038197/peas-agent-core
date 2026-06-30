@@ -61,7 +61,6 @@ CONFIG_PATH = DATA_DIR / "config.json"
 DEFAULT_WORKSPACE = DATA_DIR / "workspace"
 _ACTIVE_CONFIG: dict[str, Any] = {}
 _RUNTIME_HOST_CONTEXT: str = ""
-CONFIG_PATH_OVERRIDE: Path | None = None
 
 
 def set_host_context(text: str | None) -> None:
@@ -71,8 +70,6 @@ def set_host_context(text: str | None) -> None:
 
 
 def _get_config_path() -> Path:
-    if CONFIG_PATH_OVERRIDE is not None:
-        return CONFIG_PATH_OVERRIDE
     return CONFIG_PATH
 
 

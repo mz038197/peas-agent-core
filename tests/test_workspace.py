@@ -29,7 +29,6 @@ from peas_agent.core import (
 def peas_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "peas-agent"
     config_path = home / "config.json"
-    monkeypatch.setattr("peas_agent.core.CONFIG_PATH_OVERRIDE", config_path)
     monkeypatch.setattr("peas_agent.core.DATA_DIR", home)
     monkeypatch.setattr("peas_agent.core.CONFIG_PATH", config_path)
     monkeypatch.setattr("peas_agent.core.DEFAULT_WORKSPACE", home / "workspace")

@@ -17,7 +17,6 @@ def peas_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "peas-agent"
     monkeypatch.setattr("peas_agent.core.DATA_DIR", home)
     monkeypatch.setattr("peas_agent.core.DEFAULT_WORKSPACE", home / "workspace")
-    monkeypatch.setattr("peas_agent.core.CONFIG_PATH_OVERRIDE", None)
     return home
 
 
@@ -44,7 +43,7 @@ def _patch_agent_deps(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return build_calls
 
 
-def test_reload_reads_agent_config_path_not_global_override(
+def test_reload_reads_agent_config_path(
     peas_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = init_workspace(peas_home / "workspace")
@@ -59,9 +58,6 @@ def test_reload_reads_agent_config_path_not_global_override(
     assert build_calls[0]["llm"]["reasoning"]["effort"] == "low"
     assert build_calls[1]["llm"]["reasoning"]["effort"] == "high"
 
-    import peas_agent.core as core
-
-    core.CONFIG_PATH_OVERRIDE = config_b
     _write_config(config_a, effort="medium")
     agent_a.history.append(HumanMessage(content="hello"))
     original_history = list(agent_a.history)
