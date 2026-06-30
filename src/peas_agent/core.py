@@ -4,7 +4,7 @@ Agent Workshop 核心（agent_core.py）— WG-12～21 邏輯 + WG-22 `Agent` �
 對齊 `challenges-agent-workshop.md`（**WG-12～22**）；CLI 進入點見 **`main.py`**。
 學生 CLI 進入點：**`main.py`**（`from agent_core import Agent`）。
 
-公開 API：`Agent.create(workspace=..., session_name=...)`、`Agent.chat(user_text, *, image_path=..., on_token=..., on_reasoning=..., on_stream_reset=...)`、`Agent.reload_llm_config()`
+公開 API：`Agent.create(workspace=..., session_name=..., config_path=...)`、`Agent.chat(user_text, *, image_path=..., on_token=..., on_reasoning=..., on_stream_reset=...)`、`Agent.reload_llm_config()`
 """
 
 from __future__ import annotations
@@ -139,28 +139,29 @@ def _merge_config_defaults(
     return merged, changed
 
 
-def _ensure_config() -> dict[str, Any]:
-    path = _get_config_path()
+def _load_config_at(path: Path, *, create_if_missing: bool = False) -> dict[str, Any]:
+    """Load config from an explicit path; optional create-on-miss for CLI bootstrap."""
     defaults = _default_config()
     if not path.is_file():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(defaults, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        print(
-            f"已建立設定檔 {path}；請編輯 llm.api_key 後重新執行。"
-        )
-        return defaults
+        if create_if_missing:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(defaults, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"已建立設定檔 {path}；請編輯 llm.api_key 後重新執行。"
+            )
+        return copy.deepcopy(defaults)
 
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         print(f"警告：{path} 不是有效 JSON，使用內建預設值。")
-        return defaults
+        return copy.deepcopy(defaults)
 
     if not isinstance(loaded, dict):
-        return defaults
+        return copy.deepcopy(defaults)
 
     merged, changed = _merge_config_defaults(loaded, defaults)
     if changed:
@@ -169,6 +170,10 @@ def _ensure_config() -> dict[str, Any]:
             encoding="utf-8",
         )
     return merged
+
+
+def _ensure_config() -> dict[str, Any]:
+    return _load_config_at(_get_config_path(), create_if_missing=True)
 
 
 def _resolve_workspace(
@@ -1731,6 +1736,7 @@ class Agent:
         *,
         workspace: Path,
         project_root: Path,
+        config_path: Path,
         config: dict[str, Any],
         session_path: str,
         history: list[BaseMessage],
@@ -1742,6 +1748,7 @@ class Agent:
     ) -> None:
         self.workspace = workspace
         self.project_root = project_root
+        self.config_path = config_path
         self.config = config
         self.session_path = session_path
         self.history = history
@@ -1759,8 +1766,14 @@ class Agent:
         project_root: str | Path | None = None,
         session_name: str | None = None,
         host_context: str | None = None,
+        config_path: str | Path | None = None,
     ) -> Agent:
-        config = _ensure_config()
+        if config_path is not None:
+            resolved_config_path = Path(config_path).expanduser().resolve()
+            config = _load_config_at(resolved_config_path)
+        else:
+            resolved_config_path = _get_config_path()
+            config = _ensure_config()
         resolved_workspace = init_workspace(
             _resolve_workspace(workspace, config)
         )
@@ -1780,6 +1793,7 @@ class Agent:
         agent = cls(
             workspace=resolved_workspace,
             project_root=resolved_project_root,
+            config_path=resolved_config_path,
             config=config,
             session_path=session_str,
             history=history,
@@ -1795,8 +1809,8 @@ class Agent:
         return agent
 
     def reload_llm_config(self) -> None:
-        """重讀 config.json 並重建 llm / llm_tools；保留 history 與 session 狀態。"""
-        config = _ensure_config()
+        """重讀 self.config_path 並重建 llm / llm_tools；保留 history 與 session 狀態。"""
+        config = _load_config_at(self.config_path)
         _configure_runtime(self.workspace, config, self.project_root)
         self.config = config
         self.llm, self.llm_tools = _build_agent_llm_clients(config)
