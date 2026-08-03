@@ -98,7 +98,7 @@ def test_stream_model_response_routes_callbacks() -> None:
 def test_run_react_turn_calls_on_stream_reset_on_tool_round(monkeypatch: pytest.MonkeyPatch) -> None:
     tool_response = AIMessage(
         content="",
-        tool_calls=[{"name": "add_numbers", "args": {"a": 1, "b": 2}, "id": "1"}],
+        tool_calls=[{"name": "read_file", "args": {"path": "x.txt"}, "id": "1"}],
     )
     final_response = AIMessage(content=[{"type": "text", "text": "done"}])
     calls = {"n": 0}
@@ -108,7 +108,7 @@ def test_run_react_turn_calls_on_stream_reset_on_tool_round(monkeypatch: pytest.
         return final_response if calls["n"] > 1 else tool_response
 
     monkeypatch.setattr("peas_agent.core._stream_model_response", fake_stream)
-    monkeypatch.setattr("peas_agent.core._run_bound_tool", lambda name, args: "3")
+    monkeypatch.setattr("peas_agent.core._run_bound_tool", lambda name, args: "ok")
 
     resets: list[str] = []
 

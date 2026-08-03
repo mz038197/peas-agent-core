@@ -949,19 +949,18 @@ wheels = [
 
 [[package]]
 name = "peas-agent-core"
-version = "0.5.10"
+version = "0.5.11"
 source = { editable = "." }
 dependencies = [
     { name = "croniter" },
-    { name = "ddgs" },
     { name = "dulwich" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "peas-agent-tools" },
     { name = "python-multipart" },
-    { name = "readability-lxml" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
 ]
@@ -980,15 +979,14 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "croniter", specifier = ">=6.0.0" },
-    { name = "ddgs", specifier = ">=9.5.5" },
     { name = "dulwich", specifier = ">=0.22.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-openai", specifier = ">=1.1.13" },
+    { name = "peas-agent-tools", git = "https://github.com/mz038197/peas-agent-tools.git?branch=master" },
     { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "readability-lxml", specifier = ">=0.8.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=14.0" },
 ]
@@ -1002,6 +1000,17 @@ dev = [
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=14.0" },
+]
+
+[[package]]
+name = "peas-agent-tools"
+version = "0.1.4"
+source = { git = "https://github.com/mz038197/peas-agent-tools.git?branch=master#b81e4eeccadcd87a9319cd7811d5d57ca0febd2a" }
+dependencies = [
+    { name = "ddgs" },
+    { name = "httpx" },
+    { name = "langchain-core" },
+    { name = "readability-lxml" },
 ]
 
 [[package]]

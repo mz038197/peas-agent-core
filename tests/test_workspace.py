@@ -18,6 +18,7 @@ from peas_agent.core import (
     _resolve_project_root,
     _resolve_session_path,
     _resolve_workspace,
+    _sync_tools_config,
     _validate_session_name,
     get_token_budget,
     init_workspace,
@@ -170,6 +171,7 @@ def test_read_file_resolves_workspace_builtin_skills_path(
     project.mkdir()
     monkeypatch.setattr("peas_agent.core.WORKSPACE", ws)
     monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project)
+    _sync_tools_config()
 
     result = read_file.invoke(
         {"path": "builtin_skills/skill-creator/SKILL.md", "offset": 1, "limit": 3}

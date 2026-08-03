@@ -1,23 +1,25 @@
 [project]
 name = "peas-agent-core"
-version = "0.5.10"
+version = "0.5.11"
 description = "PEAS Agent Core — LangChain ReAct agent with workspace, memory, and skills"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "croniter>=6.0.0",
     "dulwich>=0.22.0",
-    "ddgs>=9.5.5",
     "fastapi>=0.115.0",
     "httpx>=0.28.0",
     "jinja2>=3.1.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=1.1.13",
+    "peas-agent-tools",
     "python-multipart>=0.0.9",
-    "readability-lxml>=0.8.4",
     "uvicorn[standard]>=0.32.0",
     "websockets>=14.0",
 ]
+
+[tool.uv.sources]
+peas-agent-tools = { git = "https://github.com/mz038197/peas-agent-tools.git", branch = "master" }
 
 [project.scripts]
 peas-agent = "peas_agent.cli:main"

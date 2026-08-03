@@ -9,15 +9,12 @@ Agent Workshop 核心（agent_core.py）— WG-12～21 邏輯 + WG-22 `Agent` �
 
 from __future__ import annotations
 
-import base64
 import copy
 import json
-import locale
 import os
 import platform
 import re
 import shutil
-import subprocess
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,10 +31,22 @@ from langchain_core.messages import (
     ToolMessage,
     message_chunk_to_message,
 )
-from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from peas_agent.builtin_web import configure_web, web_fetch, web_search, web_tools_enabled
+from peas_agent_tools import (
+    ToolSettings,
+    configure,
+    configure_web,
+    discover_project_root,
+    get_builtin_tools,
+    guess_media_type,
+    image_bytes_to_data_url,
+)
+from peas_agent_tools.file_tools import read_file  # re-export for tests / callers
+from peas_agent_tools.paths import (
+    resolve_project_image_path as _tools_resolve_project_image_path,
+)
+from peas_agent_tools.paths import resolve_project_path as _tools_resolve_project_path
 from peas_agent.prompt_templates import (
     load_bundled_template,
     render_template,
@@ -188,26 +197,13 @@ def _resolve_workspace(
     return DEFAULT_WORKSPACE.expanduser().resolve()
 
 
-PROJECT_ROOT_MARKERS = (".git", "pyproject.toml", "uv.lock")
-
-
-def _discover_project_root(start: Path) -> Path:
-    current = start.expanduser().resolve()
-    if current.is_file():
-        current = current.parent
-    for candidate in (current, *current.parents):
-        if any((candidate / marker).exists() for marker in PROJECT_ROOT_MARKERS):
-            return candidate
-    return current
-
-
 def _resolve_project_root(project_root: str | Path | None) -> Path:
     if project_root is not None:
         return Path(project_root).expanduser().resolve()
     env_project = os.environ.get("PEAS_AGENT_PROJECT_ROOT")
     if env_project:
         return Path(env_project).expanduser().resolve()
-    return _discover_project_root(Path.cwd())
+    return discover_project_root(Path.cwd())
 
 
 def init_workspace(workspace: Path) -> Path:
@@ -366,6 +362,7 @@ def _configure_runtime(
     if project_root is not None:
         PROJECT_ROOT = project_root.expanduser().resolve()
     _ACTIVE_CONFIG = config
+    _sync_tools_config()
     configure_web(config)
     _set_memory_paths(workspace)
     SKILLS_LOADER = SkillsLoader(workspace)
@@ -380,7 +377,7 @@ def _configure_runtime(
 
 
 # ---------------------------------------------------------------------------
-# WG-13：identity／bootstrap、add_numbers、串流輔助（run_react_turn 見 WG-18 之後）
+# WG-13：identity／bootstrap、串流輔助（run_react_turn 見 WG-18 之後）
 # ---------------------------------------------------------------------------
 
 
@@ -437,12 +434,6 @@ def _load_project_instructions(project_root: Path) -> str:
     return f"## Project AGENTS.md\n\n{content}"
 
 
-@tool
-def add_numbers(a: float, b: float) -> float:
-    """兩個數字相加並回傳和。純算術必須呼叫此工具，不可心算後直接回答。"""
-    return float(a) + float(b)
-
-
 def _stream_model_response(
     llm_tools: ChatOpenAI,
     messages: list[BaseMessage],
@@ -469,111 +460,11 @@ def _stream_model_response(
 
 
 # ---------------------------------------------------------------------------
-# WG-14：workspace 檔案／shell `@tool`（追加至 WG-13 之 TOOLS）
+# WG-14：內建 tools（peas-agent-tools）+ workspace 合併
 # ---------------------------------------------------------------------------
 
 WORKSPACE = DEFAULT_WORKSPACE.expanduser().resolve()
 PROJECT_ROOT = Path.cwd().resolve()
-
-
-def resolve_project_path(path: str) -> Path:
-    """Resolve a filesystem path. Absolute paths are used as-is; relative paths are under PROJECT_ROOT."""
-    raw = Path(path)
-    if raw.is_absolute():
-        return raw.expanduser().resolve()
-    return (PROJECT_ROOT / path).expanduser().resolve()
-
-
-def resolve_workspace_path(path: str) -> Path:
-    """Deprecated alias for project-relative tool paths.
-
-    Kept for backward compatibility only. Despite the historical name, this
-    resolves relative paths against PROJECT_ROOT, not the agent workspace.
-    New code should call resolve_project_path().
-    """
-    return resolve_project_path(path)
-
-
-def _resolve_readable_path(path: str) -> Path:
-    """Resolve a readable file path, with bundled package files as a fallback."""
-    target = resolve_project_path(path)
-    if target.is_file():
-        return target
-
-    if not Path(path).is_absolute():
-        workspace_target = (WORKSPACE / path).expanduser().resolve()
-        if workspace_target.is_file():
-            return workspace_target
-
-        pkg_target = (PACKAGE_DIR / path).expanduser().resolve()
-        if pkg_target.is_file():
-            return pkg_target
-    return target
-
-
-@tool("read_file")
-def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
-    """讀取 UTF-8 文字檔，回傳帶行號內容。接受絕對路徑或相對於 project root 的路徑。"""
-    try:
-        target = _resolve_readable_path(path)
-        if not target.is_file():
-            return f"Error: not a file: {path}"
-        lines = target.read_text(encoding="utf-8").splitlines()
-        start = max(offset - 1, 0)
-        end = min(start + limit, len(lines))
-        return "\n".join(f"{i + 1}| {line}" for i, line in enumerate(lines[start:end], start))
-    except Exception as e:
-        return f"Error: {e}"
-
-
-@tool("write_file")
-def write_file(path: str, content: str) -> str:
-    """整檔覆寫寫入 UTF-8 文字檔（必要時建立父資料夾）。接受絕對路徑或相對於 project root 的路徑。"""
-    try:
-        target = resolve_project_path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        return f"wrote {len(content)} characters to {path}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-@tool("edit_file")
-def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
-    """在既有檔案中把 old_text 換成 new_text（預設僅單次替換）。接受絕對路徑或相對於 project root 的路徑。"""
-    try:
-        target = resolve_project_path(path)
-        text = target.read_text(encoding="utf-8")
-        count = text.count(old_text)
-        if count == 0:
-            return "Error: old_text not found"
-        if count > 1 and not replace_all:
-            return "Error: old_text appears multiple times"
-        target.write_text(
-            text.replace(old_text, new_text, -1 if replace_all else 1),
-            encoding="utf-8",
-        )
-        return f"edited {path}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-@tool("list_dir")
-def list_dir(path: str, recursive: bool = False, max_entries: int = 200) -> str:
-    """列出資料夾內容。接受絕對路徑或相對於 project root 的路徑。"""
-    try:
-        root = resolve_project_path(path)
-        if not root.is_dir():
-            return f"Error: not a directory: {path}"
-        iterator = root.rglob("*") if recursive else root.iterdir()
-        entries = [str(item) for item in iterator][:max_entries]
-        return "\n".join(entries) if entries else "(empty)"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-_READ_IMAGE_ALLOWED_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-_READ_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 
 
 def get_exec_default_timeout() -> int:
@@ -585,6 +476,34 @@ def get_exec_default_timeout() -> int:
         except (TypeError, ValueError):
             pass
     return 120
+
+
+def _sync_tools_config() -> None:
+    configure(
+        ToolSettings(
+            project_root=PROJECT_ROOT,
+            workspace=WORKSPACE,
+            package_dir=PACKAGE_DIR,
+            exec_default_timeout=get_exec_default_timeout(),
+        )
+    )
+
+
+def resolve_project_path(path: str) -> Path:
+    """Resolve a filesystem path. Absolute paths are used as-is; relative paths are under PROJECT_ROOT."""
+    _sync_tools_config()
+    return _tools_resolve_project_path(path)
+
+
+def resolve_workspace_path(path: str) -> Path:
+    """Deprecated alias for project-relative tool paths."""
+    return resolve_project_path(path)
+
+
+def resolve_project_image_path(rel: str) -> Path:
+    """WG-21：解析附圖路徑。絕對路徑直接使用；相對路徑以 project root 為基準。"""
+    _sync_tools_config()
+    return _tools_resolve_project_image_path(rel)
 
 
 def _analyze_image_with_vision(
@@ -603,110 +522,22 @@ def _analyze_image_with_vision(
     return extract_answer_text(response)
 
 
-@tool("read_image")
-def read_image(path: str, question: str = "描述此截圖內容。") -> str:
-    """分析專案內 PNG/JPEG/WebP 截圖（nested vision），回傳文字描述供自我驗證。"""
-    try:
-        target = resolve_project_image_path(path)
-        if not target.is_file():
-            return f"Error: not a file: {path}"
-        suffix = target.suffix.lower()
-        if suffix not in _READ_IMAGE_ALLOWED_SUFFIXES:
-            allowed = ", ".join(sorted(_READ_IMAGE_ALLOWED_SUFFIXES))
-            return f"Error: unsupported image type: {suffix or '(no extension)'} (use {allowed})"
-        size = target.stat().st_size
-        if size > _READ_IMAGE_MAX_BYTES:
-            return f"Error: image too large ({size} bytes; max {_READ_IMAGE_MAX_BYTES})"
-        media_type = guess_media_type(target)
-        data = target.read_bytes()
-        analysis = _analyze_image_with_vision(path, question, data, media_type)
-        if not analysis:
-            return f"Error: vision model returned empty response for {path}"
-        q = (question or "").strip() or "描述此截圖內容。"
-        return f"[read_image: {path}]\nQuestion: {q}\nAnalysis:\n{analysis}"
-    except RuntimeError as e:
-        return f"Error: {e}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-@tool("exec")
-def exec_workspace(command: str, timeout: int | None = None, cwd: str | None = None) -> str:
-    """執行 shell 指令（已阻擋常見危險片段）。可選 cwd 指定工作目錄；預設為 project root。"""
-    if timeout is None:
-        timeout = get_exec_default_timeout()
-    blocked = ("rm -rf", "del /f", "rmdir /s", "format", "shutdown")
-    lowered = command.lower()
-    if any(part in lowered for part in blocked):
-        return "Error: blocked dangerous command (safety limit)"
-    if os.name == "nt" and "<<" in command:
-        return (
-            "Error: heredoc syntax is disabled in this Windows runtime. "
-            "Use write_file to create a .py script, then run it with "
-            "uv run python <script.py>."
-        )
-
-    work_dir = resolve_project_path(cwd) if cwd else PROJECT_ROOT
-    if not work_dir.is_dir():
-        return f"Error: not a directory: {cwd or PROJECT_ROOT}"
-
-    child_env = os.environ.copy()
-    child_env.setdefault("PYTHONUTF8", "1")
-    child_env.setdefault("PYTHONIOENCODING", "utf-8")
-
-    run_kw: dict[str, Any] = {
-        "cwd": str(work_dir),
-        "shell": True,
-        "capture_output": True,
-        "timeout": timeout,
-        "env": child_env,
-    }
-    if os.name == "nt":
-        run_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-    try:
-        result = subprocess.run(command, **run_kw)
-        stdout = _decode_process_output(result.stdout or b"")
-        stderr = _decode_process_output(result.stderr or b"")
-        output = (stdout + stderr).strip()
-        cap = 4000
-        if len(output) > cap:
-            output = output[:cap] + "\n\n[truncated]"
-        if not output:
-            output = "(no stdout or stderr; command finished with no captured output)"
-        return f"exit_code={result.returncode}\n{output}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
 def _get_builtin_tools() -> list[Any]:
-    tools: list[Any] = [
-        add_numbers,
-        read_file,
-        read_image,
-        write_file,
-        edit_file,
-        list_dir,
-        exec_workspace,
-    ]
-    if web_tools_enabled():
-        tools.extend([web_search, web_fetch])
-    return tools
+    _sync_tools_config()
+    return get_builtin_tools(vision_analyzer=_analyze_image_with_vision)
 
 
-def _decode_process_output(data: bytes) -> str:
-    encodings = ["utf-8", locale.getpreferredencoding(False), "cp950"]
-    for encoding in dict.fromkeys(encodings):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
+def _read_image_tool() -> Any:
+    """Test helper：取得已注入 vision_analyzer 的 read_image tool。"""
+    _sync_tools_config()
+    tools = get_builtin_tools(
+        include=["read_image"],
+        vision_analyzer=_analyze_image_with_vision,
+    )
+    return tools[0]
 
 
-BUILTIN_TOOLS = _get_builtin_tools()
-
-_TOOL_BY_NAME: dict[str, Any] = {t.name: t for t in BUILTIN_TOOLS}
+_TOOL_BY_NAME: dict[str, Any] = {}
 
 
 def _rebuild_tool_registry(all_tools: list[Any]) -> None:
@@ -896,31 +727,6 @@ def load_session_jsonl(path: str) -> tuple[list[BaseMessage], dict[str, Any] | N
 _IMAGE_PLACEHOLDER_RE = re.compile(
     r"\n\n\[此回合曾附圖，路徑：([^\]]+)\](?:（media_type=([^）]+)）)?\s*$"
 )
-
-
-def guess_media_type(path: Path, fallback: str = "image/png") -> str:
-    ext = path.suffix.lower()
-    if ext in (".jpg", ".jpeg"):
-        return "image/jpeg"
-    if ext == ".png":
-        return "image/png"
-    if ext == ".webp":
-        return "image/webp"
-    return fallback
-
-
-def image_bytes_to_data_url(data: bytes, media_type: str) -> str:
-    b64 = base64.b64encode(data).decode("ascii")
-    return f"data:{media_type};base64,{b64}"
-
-
-def resolve_project_image_path(rel: str) -> Path:
-    """WG-21：解析附圖路徑。絕對路徑直接使用；相對路徑以 project root 為基準。"""
-    raw = Path(rel)
-    if raw.is_absolute():
-        return raw.expanduser().resolve()
-    base = PROJECT_ROOT if PROJECT_ROOT is not None else Path.cwd()
-    return (base / rel).expanduser().resolve()
 
 
 def parse_history_human_content(content: str) -> tuple[str, str | None, str | None]:

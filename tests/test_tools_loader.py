@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from langchain_core.tools import tool
 
-from peas_agent.core import BUILTIN_TOOLS, _load_all_tools, init_workspace
+from peas_agent.core import _get_builtin_tools, _load_all_tools, init_workspace
 from peas_agent.tools_loader import (
     ToolsLoader,
     discover_tool_files,
@@ -94,7 +94,7 @@ def test_merge_tools_skips_builtin_name_conflicts() -> None:
         return str(x)
 
     warnings: list[str] = []
-    merged = merge_tools(BUILTIN_TOOLS, [read_file, student_tool], warnings=warnings)
+    merged = merge_tools(_get_builtin_tools(), [read_file, student_tool], warnings=warnings)
     names = {t.name for t in merged}
     assert "student_tool" in names
     assert len([t for t in merged if t.name == "read_file"]) == 1
