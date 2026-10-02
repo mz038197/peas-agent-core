@@ -12,6 +12,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=1.1.13",
+    "peas-agent-skills",
     "peas-agent-tools",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.32.0",
@@ -20,6 +21,7 @@ dependencies = [
 
 [tool.uv.sources]
 peas-agent-tools = { git = "https://github.com/mz038197/peas-agent-tools.git", branch = "master" }
+peas-agent-skills = { path = "../peas-agent-skills", editable = true }
 
 [project.scripts]
 peas-agent = "peas_agent.cli:main"

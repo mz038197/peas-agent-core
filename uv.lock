@@ -959,6 +959,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "peas-agent-skills" },
     { name = "peas-agent-tools" },
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
@@ -985,6 +986,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-openai", specifier = ">=1.1.13" },
+    { name = "peas-agent-skills", editable = "../peas-agent-skills" },
     { name = "peas-agent-tools", git = "https://github.com/mz038197/peas-agent-tools.git?branch=master" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
@@ -1001,6 +1003,16 @@ dev = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
     { name = "websockets", specifier = ">=14.0" },
 ]
+
+[[package]]
+name = "peas-agent-skills"
+version = "0.1.0"
+source = { editable = "../peas-agent-skills" }
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "peas-agent-tools"
