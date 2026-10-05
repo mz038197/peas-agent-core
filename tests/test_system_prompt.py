@@ -110,6 +110,43 @@ def test_default_memory_template_skipped(workspace: Path) -> None:
     assert "User prefers concise replies" in prompt2
 
 
+def test_system_prompt_does_not_list_portal_tools(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from langchain_core.tools import tool
+
+    (workspace / "peas-mcp.json").write_text(
+        """
+{
+  "servers": {
+    "vans-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:9/mcp/",
+      "headers": {"Authorization": "Bearer test-key"}
+    }
+  }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    @tool("notion_search_pages")
+    def notion_search_pages(query: str) -> str:
+        """portal tool"""
+        return query
+
+    async def fake_fetch(connections: dict) -> list:
+        return [notion_search_pages]
+
+    monkeypatch.setattr("peas_agent_mcp.registry.fetch_tools_async", fake_fetch)
+
+    from peas_agent.core import _load_all_tools
+
+    names = {item.name for item in _load_all_tools()}
+    assert "notion_search_pages" in names
+    assert "notion_search_pages" not in build_system_prompt()
+
+
 def test_load_bundled_template_reads_templates() -> None:
     content = load_bundled_template("SOUL.md")
     assert content is not None

@@ -545,10 +545,43 @@ def _rebuild_tool_registry(all_tools: list[Any]) -> None:
     _TOOL_BY_NAME = {t.name: t for t in all_tools}
 
 
+def _load_portal_tools() -> tuple[list[Any], str | None]:
+    """依當下的專案根重讀 Portal 設定並載入工具。失敗時不中斷對話。"""
+    from peas_agent_mcp import (
+        ensure_mcp_config,
+        get_vans_mcp_tools,
+        reset_mcp_config_for_tests,
+    )
+
+    try:
+        # 套件會記住第一次讀到的設定；每次載入都先清掉，改讀當下的專案根。
+        reset_mcp_config_for_tests()
+        ensure_mcp_config(project_root=PROJECT_ROOT)
+        return list(get_vans_mcp_tools()), None
+    except Exception as e:
+        return [], f"Portal 工具載入失敗，已略過：{e}"
+
+
 def _load_all_tools() -> list[Any]:
     result = _tools_loader().load_all()
     warnings = list(result.warnings)
-    merged = merge_tools(_get_builtin_tools(), result.tools, warnings=warnings)
+    portal_tools, portal_warning = _load_portal_tools()
+    if portal_warning:
+        warnings.append(portal_warning)
+    merged = merge_tools(
+        _get_builtin_tools(),
+        portal_tools,
+        warnings=warnings,
+        skipped_label="portal tool",
+        winner_label="a builtin tool",
+    )
+    merged = merge_tools(
+        merged,
+        result.tools,
+        warnings=warnings,
+        skipped_label="workspace tool",
+        winner_label="a builtin or portal tool",
+    )
     for warning in warnings:
         print(f"（tools: {warning}）")
     _rebuild_tool_registry(merged)

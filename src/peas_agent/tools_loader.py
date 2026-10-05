@@ -108,8 +108,10 @@ def merge_tools(
     workspace: list[Any],
     *,
     warnings: list[str] | None = None,
+    skipped_label: str = "workspace tool",
+    winner_label: str = "a builtin tool",
 ) -> list[Any]:
-    """Merge workspace tools into builtins; builtins win on name conflicts."""
+    """Merge later tools into earlier ones; the earlier list wins on name conflicts."""
     merged = list(builtin)
     seen = {str(tool.name) for tool in builtin}
     for tool in workspace:
@@ -117,7 +119,7 @@ def merge_tools(
         if name in seen:
             if warnings is not None:
                 warnings.append(
-                    f"Skipped workspace tool {name!r}: conflicts with a builtin tool"
+                    f"Skipped {skipped_label} {name!r}: conflicts with {winner_label}"
                 )
             continue
         merged.append(tool)

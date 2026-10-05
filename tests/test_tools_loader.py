@@ -123,6 +123,154 @@ def good_tool() -> str:
     assert any("bad.py" in w for w in result.warnings)
 
 
+def _portal_tool(name: str, marker: str):
+    @tool(name)
+    def _portal(query: str) -> str:
+        """portal tool"""
+        return marker
+
+    return _portal
+
+
+def _write_portal_config(project: Path, url: str) -> None:
+    project.mkdir(parents=True, exist_ok=True)
+    (project / "peas-mcp.json").write_text(
+        """
+{
+  "servers": {
+    "vans-mcp": {
+      "type": "http",
+      "url": "%s",
+      "headers": {"Authorization": "Bearer test-key"}
+    }
+  }
+}
+""".strip()
+        % url,
+        encoding="utf-8",
+    )
+
+
+def test_load_all_tools_includes_portal_tools_from_project_root(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "student-project"
+    _write_portal_config(project, "http://127.0.0.1:9/mcp/")
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project)
+    monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(workspace))
+
+    seen: dict[str, str] = {}
+
+    async def fake_fetch(connections: dict) -> list:
+        seen["url"] = connections["vans-mcp"]["url"]
+        return [_portal_tool("notion_search_pages", "from-portal")]
+
+    monkeypatch.setattr("peas_agent_mcp.registry.fetch_tools_async", fake_fetch)
+
+    names = {t.name for t in _load_all_tools()}
+    assert "notion_search_pages" in names
+    assert "read_file" in names
+    assert seen["url"] == "http://127.0.0.1:9/mcp/"
+
+
+def test_load_all_tools_rereads_portal_config_for_each_project_root(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _write_portal_config(first, "http://127.0.0.1:9/mcp/")
+    _write_portal_config(second, "http://127.0.0.1:10/mcp/")
+    monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(workspace))
+    seen: list[str] = []
+
+    async def fake_fetch(connections: dict) -> list:
+        seen.append(connections["vans-mcp"]["url"])
+        return [_portal_tool("notion_search_pages", "from-portal")]
+
+    monkeypatch.setattr("peas_agent_mcp.registry.fetch_tools_async", fake_fetch)
+
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", first)
+    _load_all_tools()
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", second)
+    _load_all_tools()
+
+    assert seen == [
+        "http://127.0.0.1:9/mcp/",
+        "http://127.0.0.1:10/mcp/",
+    ]
+
+
+def test_portal_load_failure_keeps_builtin_tools(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = tmp_path / "broken-project"
+    project.mkdir()
+    (project / "peas-mcp.json").write_text("{", encoding="utf-8")
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project)
+    monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(workspace))
+
+    names = {t.name for t in _load_all_tools()}
+    assert "read_file" in names
+    assert "notion_search_pages" not in names
+    assert "Portal 工具載入失敗" in capsys.readouterr().out
+
+
+def test_portal_tools_lose_to_builtin_and_win_over_workspace(
+    workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = tmp_path / "student-project"
+    _write_portal_config(project, "http://127.0.0.1:9/mcp/")
+    monkeypatch.setattr("peas_agent.core.PROJECT_ROOT", project)
+    monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(workspace))
+    (workspace / "tools" / "shadow.py").write_text(
+        """
+from langchain_core.tools import tool
+
+@tool
+def notion_search_pages(query: str) -> str:
+    \"\"\"workspace shadow\"\"\"
+    return "from-workspace"
+""".strip(),
+        encoding="utf-8",
+    )
+    portal_read = _portal_tool("read_file", "from-portal")
+    portal_notion = _portal_tool("notion_search_pages", "from-portal")
+
+    async def fake_fetch(connections: dict) -> list:
+        return [portal_read, portal_notion]
+
+    monkeypatch.setattr("peas_agent_mcp.registry.fetch_tools_async", fake_fetch)
+
+    tools = _load_all_tools()
+    by_name = {t.name: t for t in tools}
+    assert by_name["read_file"] is not portal_read
+    assert by_name["notion_search_pages"] is portal_notion
+    assert by_name["notion_search_pages"].invoke({"query": "x"}) == "from-portal"
+    warning = capsys.readouterr().out
+    assert "portal tool 'read_file'" in warning
+    assert "workspace tool 'notion_search_pages'" in warning
+
+
+def test_dream_tools_do_not_load_portal_tools(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from peas_agent.dream import _build_dream_tools
+
+    called = False
+
+    async def fake_fetch(connections: dict) -> list:
+        nonlocal called
+        called = True
+        return [_portal_tool("notion_search_pages", "from-portal")]
+
+    monkeypatch.setattr("peas_agent_mcp.registry.fetch_tools_async", fake_fetch)
+
+    names = {t.name for t in _build_dream_tools(workspace)}
+    assert "read_file" in names
+    assert called is False
+    assert "notion_search_pages" not in names
+
+
 def test_load_all_tools_rebuilds_registry(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("peas_agent.core.TOOLS_LOADER", ToolsLoader(workspace))
     (workspace / "tools" / "hello.py").write_text(
