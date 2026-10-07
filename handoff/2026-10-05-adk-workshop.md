@@ -1,53 +1,63 @@
 # Handoff：金融業 Google ADK 12 小時工作坊
 
-日期：2026-10-05。專案：`c:\Users\mz038\Desktop\peas-agent\peas-agent-core`。
+更新日期：2026-10-07。專案：`c:\Users\mz038\Desktop\peas-agent\peas-agent-core`。
 
-下一輪從大綱的**第一天第 3 節**接著討論。使用者要一節一節改，先讀升級版原文，再改 `bank_assistant/agent.py`。不要另寫一套課。
+第二天六節已寫進升級版大綱，仍是粗排：MCP、RAG、SKILL、Multi-Agent、SandBox、Deploy。細項先讀大綱那一格再補。不要重開「Skill 與 MCP 誰先上」。
+
+課表細項以升級版大綱為準，不要在交接裡重寫整張表：
+
+`c:\Users\mz038\Desktop\peas-agent\peas-agent-core\金融業-ADK工作坊-12小時-升級.md`
 
 ## 以哪份檔為準
 
-課表以這兩份為準，內容應一致：
-
-- `c:\Users\mz038\Desktop\peas-agent\peas-agent-core\金融業-ADK工作坊-12小時-升級.md`
-- `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\金融業-ADK工作坊-12小時-升級.docx`
-
-Word 若正開著會存檔失敗。先改 Markdown，Word 能寫再同步。
-
-長稿 `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\金融業-ADK工作坊-12小時.md` 有舊段落，堂次和節次可能對不上。不要拿它覆蓋升級版。
-
-不要改 `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\台南一中\南一中-Agent課程-12堂.md`。
+- Markdown 與 Word 應一致：`G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\金融業-ADK工作坊-12小時-升級.docx`
+- Word 若正開著會存檔失敗。先改 Markdown。到 2026-10-07，Word 尚未同步這幾天的改動。
+- 長稿 `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\金融業-ADK工作坊-12小時.md` 堂次可能對不上。不要拿它覆蓋升級版。
+- 不要改 `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\台南一中\南一中-Agent課程-12堂.md`。
+- SEQ／PAR／LOOP／RTR 的四句對照來自 `G:\我的雲端硬碟\Obsidian\Agent\raw\materials\神通科技\台南一中\台南一中_教學課程大綱_agent新版.docx` 的 2026.11.11 第 4 堂。只借形狀，情境用禾豐進件。
 
 ## 課表規則（已定）
 
-- 主線是合成進件：禾豐食品、週轉金 800 萬。模型不寫核貸。既有額度 300 萬只能來自之後的工具，第 1 堂講出來算編的。
-- 同一天節數往下累加。第一天第 1 節到第 6 節，第二天再從第 1 節數。堂次仍是第 1 堂到第 6 堂。
-- 第 1 堂第 1 節已合併原第 2 節（兩套身份）。後面各節上移一格。第 6 堂第 2 節（第二天第 6 節）空著。Demo 在第二天第 5 節。
-- 第 1 堂第 2 節是記憶與 session 儲存，不掛工具。
-- 三種執行都寫在第 1 堂第 1 節，都要跑過：
-  - `uv run adk web bank_assistant --port 8010`
-  - `uv run adk run bank_assistant`
-  - `uv run python bank_assistant/agent.py`
-- 直接打 `adk` 會失敗。指令在專案的 `.venv`，前面要加 `uv run`。
-- 8000 埠曾被另一支 Python 佔用。課堂指令用 `--port 8010`。
+- 同一天節數往下累加。第一天第 1 到第 6 節，第二天再從第 1 節數。
+- 第 3、第 4 節是同一圈 ReAct，不拆成 Lv6 工具和 Lv7 先查再講。第 4 節不另加機制。
+- 第 5 節主題是 Prompt Chaining / Parallelization（SEQ / PAR）。
+- 第 6 節是 LOOP／RTR，Loop 寫完才接 RTR。RTR 不要再搬到第二天。
+- LOOP／RTR 佔第一天第 6 節。第二天第 6 節是 Deploy。
+- 舊 Route、Confirm、Lv8、獨立 Demo 不再佔第二天的格子。確認鍵沒有併進 Deploy。
+- 第二天第 4 節是 Multi-Agent：父層把覆核員當工具叫來，問完自己寫回經辦。第一天 RTR 仍是 `sub_agents` 把報告交出去。
+- 直接打 `adk` 會失敗，前面加 `uv run`。課堂用 `--port 8010`。
+- `.env` 的鑰匙不要讀出來，也不要寫進交接、大綱、git。
 
-## 程式現況
+## 情境（口頭故事）
 
-實作只在 `bank_assistant/agent.py`。`google-adk` 已用 `uv add` 進 `pyproject.toml`，裝到的版本是 2.11.0。
+經辦打「禾豐食品要申請週轉金 800 萬」。先收件，再同時查主檔、既有額度、警示、變更登記。既有額度 300 萬只能來自查詢。然後寫有固定段落的初審報告。不合格最多改兩輪，仍不合格就留在經辦，不送部門。
 
-- 模型走 Vans router：`OpenAILlm` 從 `.env` 讀 `MODEL_NAME`（`vcr-auto`）、`BASE_URL`（`https://ai.vanscoding.com/v1`）、`VCR_API_KEY`。`_load_env()` 在建立 `root_agent` 之前。第一天第 1 節已寫進升級版大綱。
-- 溫度不要寫成 `Agent(temperature=0)`。要寫 `generate_content_config=types.GenerateContentConfig(temperature=0)`。
-- 對話迴圈是 `input()` 加 `Runner.run_debug(..., session_id="s1")`。這只給課堂在終端機試。正式環境留 `root_agent`，改走 `run_async`，不要靠 `input()`。
-- `SESSION_STORE` 預設 `sqlite`，檔在 `bank_assistant/.adk/session.db`。另有 `memory`、`postgres`。PostgreSQL 網址必須是 `postgresql+asyncpg://`。`asyncpg` 尚未安裝。
-- 這版 ADK 的 Runner 類別只有 `Runner` 和 `InMemoryRunner`。沒有 MongoDB session 服務。SQL 只有 SQLite、PostgreSQL、MySQL、MariaDB、SQL Server。
-- `.env` 已存在且在 `.gitignore`。不要把鑰匙讀出來或寫進交接、大綱、git。`.adk` 也已忽略。
+合格後才送部門。警示命中去覆核（山海）。缺件不是「無」去補件（北岸）。兩個都有先覆核。其餘留草稿（禾豐）。都不送審。經辦收件、查、寫報告，沒有准駁權。
+
+## 程式
+
+`bank_assistant/agent.py` 維持單顆 `root_agent`，給 `adk web`。後面每一層各一支，不回寫 `agent.py`。
+
+| 檔 | 做什麼 |
+|---|---|
+| `queries.py` | 四支查詢與 `CASES`。300 萬只在這裡 |
+| `seq.py` | 收件、一次查完、寫意見。`session_id` 預設沿用 s1 |
+| `par.py` | 收件後四支同時查。對話編號 `par` |
+| `loop.py` | 同一條再寫 `ReviewReport`，最多兩輪。對話編號 `loop` |
+| `rtr.py` | 報告之後，聊天模型當 `route`，`sub_agents` 交給 review／supplement／draft。對話編號 `rtr` |
+| `jev.py` | 示範。`JevRoute` 打 `POST {BASE_URL}/decisions`，不包成 tool。目前用山海範例報告單跑，還沒排進 `revise` 後面 |
+
+模型是 `OpenAILlm`，從 `.env` 讀 `MODEL_NAME`、`BASE_URL`、`VCR_API_KEY`。決策模型環境變數是 `DECISION_MODEL`，預設 `vcr-auto`。指定 Jev 的 id 是 `openrouter@typesafe/jev-1.13`。規格在 `D:\Work\Python\vans_coding_router\docs\openapi\chat-completions-and-responses.openapi.yaml` 的 `/v1/decisions`。
+
+`output_key` 只存該顆最後一次回答。`{intake.company}` 不會拆欄。要單欄就用 callback 抄到 `state["company"]`。`sub_agents` 是把報告交出去。把 Agent 當 tool 是問完還由父層轉述。這節用前者。
+
+Jev 是決策模型，不寫封面。封面仍由部門那顆文字模型寫。
 
 ## 下一輪怎麼做
 
-使用者說「讀升級的」時，先讀上面那份 Markdown 或 Word 的那一格，不要自己重寫課程。
+討論用短句。先讀大綱那一格再改。不要另寫一套課。
 
-討論語氣要短句、一步一件事。他們要的是 Google ADK 從這份 `agent.py` 往下加，不是另做固定句示範。
-
-第 3 節（第一天，第 2 堂）主題是工具：四個查詢函式，禾豐額度 300 萬必須有工具紀錄。細節以大綱那一格為準。
+未決：第二天六格仍是粗排。MCP、Multi-Agent、SandBox、Deploy 還沒有課堂步驟。RAG 與 SKILL 沿用原驗收。Word 尚未同步。
 
 ## Suggested skills
 
